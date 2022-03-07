@@ -1,0 +1,1 @@
+# voicevox_cli_client

@@ -1,5 +1,4 @@
 
-
 # voicevox cli client
 
 [VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine)用のコマンドラインツールです。

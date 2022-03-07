@@ -1,0 +1,73 @@
+#!/bin/env ruby
+
+require 'socket'
+require 'json'
+
+
+#------
+# 設定
+#------
+
+SOCKFILE = "#{__dir__}/../var/run/seqread.sock"
+
+
+#----------
+# 関数定義
+#----------
+
+# 正しいJSON形式のデータかチェックする関数
+def valid_json?(json)
+    JSON.parse(json)
+    return true
+  rescue JSON::ParserError => e
+    return false
+end
+
+
+#----------
+# 処理開始
+#----------
+
+# メッセージデータを格納する変数を初期化
+data = ""
+
+# パイプ経由でデータが渡されていたら読み込む
+if File.pipe?(STDIN) then
+  while str = $stdin.gets
+    data += str
+  end
+# パイプ経由でデータがなければ引数から読み込む
+else
+  # 引数をチェック
+  ARGV.each{|strs|
+    if data == "" then
+      data = strs
+    else
+      data = "#{data}\n#{strs}"
+    end
+  }
+end
+
+# データがなければ処理中止
+if data == "" then
+  STDERR.print "メッセージデータがないため、処理を中止します\n"
+  exit 1
+end
+
+# データがJSONでなければ、渡されたデータは読み上げ文字列として、JSONを作成する
+if valid_json?(data) then
+  write_data = data
+else
+  temp_data = Hash.new
+  temp_data['message'] = data
+  write_data = JSON.generate(temp_data)
+end
+
+# ソケットにJSON形式のデータを書き込む
+Socket.open(:UNIX, :DGRAM) do |sock|
+  addr = Socket.sockaddr_un(SOCKFILE)
+  sock.send(write_data, 0, addr)
+end
+
+exit
+

@@ -1,0 +1,496 @@
+#!/bin/env ruby
+
+require 'net/http'
+require 'json'
+require 'cgi'
+
+# バージョン
+VERSION="1.0.0"
+
+
+#------
+# 設定
+#------
+
+# 設定ファイルを読み込む
+if File.exist?("#{__dir__}/../etc/config.rb")
+  require_relative '../etc/config.rb'
+else
+  STDOUT.print "設定ファイル \"#{__dir__}/../etc/config.rb\" が見つかりません"
+  exit 1
+end
+
+
+#----------
+# 関数定義
+#----------
+
+# デバッグメッセージを表示する関数
+def debug_print(message)
+  if @debug_flag == 1 then
+    STDERR.print "Debug: #{message}\n"
+  end
+end
+
+# 半角英数字を全角英数字に変換
+def half_to_full(str)
+  str.tr('0-9a-zA-Z\'', '０-９ａ-ｚＡ-Ｚ＇')
+end
+
+# 全角英数字を半角英数字に変換
+def full_to_half(str)
+  str.tr('０-９ａ-ｚＡ-Ｚ＇', '0-9a-zA-Z\'')
+end
+
+# ユーザ辞書一覧を取得する関数
+def get_dict(server)
+  uri = "http://#{server}/user_dict"
+  debug_print("辞書取得 URI=\"#{uri}\"")
+  res = Net::HTTP.get_response(URI.parse(uri))
+  debug_print("code=#{res.code} msg=#{res.msg} res=#{res.body}")
+  dict_list = JSON.parse(res.body)
+  if res.code == "200" then
+    return dict_list
+  else
+    return nil
+  end
+end
+
+# ユーザ辞書に単語を追加する関数
+def add_dict(server,surface,pron,accent)
+  # 各値をURLエンコードする
+  enc_surface = URI.encode(surface)
+  enc_pron = URI.encode(pron)
+  enc_accent = URI.encode(accent.to_s)
+  uri = "http://#{server}/user_dict_word?surface=#{enc_surface}&pronunciation=#{enc_pron}&accent_type=#{enc_accent}"
+  debug_print("辞書追加 URI=\"#{uri}\"")
+  res = Net::HTTP.post_form(URI.parse(uri), 'body' => nil)
+  debug_print("code=#{res.code} msg=#{res.msg}")
+  if res.code == "200" then
+    return 0
+  else
+    return 1
+  end
+end
+
+# ユーザ辞書の単語を修正する関数
+def mod_dict(server,uuid,surface,pron,accent)
+  # 各値をURLエンコードする
+  enc_surface = URI.encode(surface)
+  enc_pron = URI.encode(pron)
+  enc_accent = URI.encode(accent.to_s)
+  uri = "http://#{server}/user_dict_word/#{uuid}?surface=#{enc_surface}&pronunciation=#{enc_pron}&accent_type=#{enc_accent}"
+  debug_print("辞書修正 URI=\"#{uri}\"")
+  req = Net::HTTP.new(URI.parse(uri).host, URI.parse(uri).port)
+  res = req.put(URI.parse(uri), nil)
+  debug_print("code=#{res.code} msg=#{res.msg}")
+  if res.code == "204" then
+    return 0
+  else
+    return 1
+  end
+end
+
+# ユーザ辞書の単語を削除する関数
+def del_dict(server,uuid)
+  uri = "http://#{server}/user_dict_word/#{uuid}"
+  debug_print("辞書削除 URI=\"#{uri}\"")
+  req = Net::HTTP.new(URI.parse(uri).host, URI.parse(uri).port)
+  res = req.delete(URI.parse(uri), nil)
+  debug_print("code=#{res.code} msg=#{res.msg}")
+  if res.code == "204" then
+    return 0
+  else
+    return 1
+  end
+end
+
+# deleteall 実行時の関数
+def mode_listadd(listfile)
+
+  if not File.exist?(listfile) then
+    STDERR.print "ファイル \"#{listfile}\" がありません\n"
+    exit 1
+  else
+
+    debug_print("Open listfile \"#{listfile}\"")
+
+    surfaces = Array.new
+    prons = Array.new
+    accents = Array.new
+    print "リストファイル \"#{listfile}\" から辞書登録します\n"
+    # リストファイルを読み込む
+    File.open(listfile, "r"){|r|
+      i = 1
+      # 1行づつ処理する
+      r.each_line{|line|
+        # 空行と(先頭が#の)コメント行は無視して、それ以外を処理
+        if line !~ /^[ 　\t]+$/ and line != /^#/ then
+          surface = ""
+          pron = ""
+          accent = -1
+          # タブ区切りで値を取得
+          surface, pron, accent = line.chomp.split(/\t/)
+          # 全ての項目がきちんと記述されている場合のみ登録候補にする
+          if surface != "" and pron =~ /\A[ァ-ヶー－]+\z/ and accent =~ /^[0-9]+$/ then
+            # 英数字は全角にしておく
+            surface = half_to_full(surface)
+            surfaces << surface
+            prons << pron
+            accents << accent
+          else
+            STDERR.print "Info: \"#{line.chomp}\" 行は正しくないため無視します (line:#{i})\n"
+          end
+          # 行番号を増やす
+          i += 1
+        end
+      }
+    }
+    # 登録候補がある場合に登録を実施する
+    if surfaces.length > 0 then
+      fail_flag = 0
+      # 各単語ごとに処理
+      surfaces.each_with_index{|value,index|
+        # エンジンごとに処理
+        VOICEVOX_ENGINE.each{|server|
+          # 辞書に単語を追加
+          retval = add_dict(server,surfaces[index],prons[index],accents[index])
+          if retval == 0 then
+            print "単語 \"#{full_to_half(surfaces[index])}\" 読み \"#{prons[index]}\" を追加しました (server=\"#{server}\")\n"
+          else
+            print "単語 \"#{full_to_half(surfaces[index])}\" 読み \"#{prons[index]}\" の追加に失敗しました (server=\"#{server}\")\n"
+            fail_flag = 1
+          end
+        }
+      }
+    else
+        STDERR.print "登録候補の情報がないため登録は行いません\n"
+    end
+  end
+  if fail_flag == 0 then
+    return 0
+  else
+    return 1
+  end
+end
+
+# deleteall 実行時の関数
+def mode_deleteall()
+
+  # 失敗フラグ
+  fail_flag = 0
+
+  # エンジンごとに処理
+  VOICEVOX_ENGINE.each{|server|
+    # 現在登録されているUUIDを調べる
+    dict = get_dict(server)
+    if dict.length > 0 then
+      dict.each{|uuid,data|
+        surface = data['surface']
+        # 辞書の単語を削除
+        retval = del_dict(server,uuid)
+        # メッセージ表示
+        if retval == 0 then
+          print "単語 \"#{full_to_half(surface)}\" を削除しました (server=\"#{server}\")\n"
+        else
+          print "単語 \"#{full_to_half(surface)}\" の削除に失敗しました (server=\"#{server}\")\n"
+          fail_flag = 1
+        end
+      }
+    else
+      print "辞書登録されている単語はありません (server=\"#{server}\")\n"
+    end
+  }
+  if fail_flag == 0 then
+    return 0
+  else
+    return 1
+  end
+end
+
+
+#----------
+# 処理開始
+#----------
+
+# デバッグモードを使用するかどうかを格納する変数
+@debug_flag = 0
+
+# 動作モードを格納する変数
+mode = ""
+
+# 引数がなかったらエラー
+if ARGV.length < 1 then
+  STDERR.print "Usage: #{__FILE__} show|add|del|listadd|deleteall|rereg [options] \n"
+  exit 1
+end
+
+# 1番目の引数をmodeに格納
+mode = ARGV[0]
+options = ARGV[1..-1]
+
+# デバッグオプションが指定されているかチェック
+options.each{|value|
+  if value == "--debug" then
+    @debug_flag = 1
+    debug_print("debug mode on")
+    options.delete("--debug")
+  end
+}
+
+# 辞書に登録する単語を格納する変数を初期化
+surface = ""
+# カタカナでの読み方を格納する変数を初期化
+pron = ""
+# アクセント核位置(整数)を格納する変数を初期化
+accent = -1
+
+# オプションを全て読み出すまで繰り返し
+while options.length > 0 do
+  # 引数から、単語、読み方、核位置を順に読み込む
+  if surface == "" then
+    surface = options[0]
+    # listadd rereg の場合はファイル名がここに入るため変換しない
+    if mode != "listadd" and mode != "rereg" then
+      # 半角英数字は辞書の中では全角英数字として登録されるため、あらかじめ変換
+      surface = half_to_full(surface)
+    end
+  elsif pron == "" then
+    pron = options[0]
+  elsif accent == -1 then
+    if options[0] !~ /^[0-9]+$/ then
+      STDERR.print "アクセント核位置は整数で指定してください (#{options[0]})\n"
+      exit 1
+    end
+    accent = options[0].to_i
+  end
+  # 先頭のオプションを削除
+  options.shift
+end
+
+
+# サブコマンドが「show」の場合
+if mode == "show" then
+
+  # オプションが指定されていたら
+  if surface != "" or pron != "" or accent != -1 then
+    STDERR.print "Usage: #{__FILE__} show\n"
+    exit 1
+  end
+
+  # 1台のエンジンだけから情報を取得する
+  first_server = VOICEVOX_ENGINE[0]
+  print_data = Array.new
+  # 情報を取得
+  dict = get_dict(first_server)
+  if dict.nil? then
+    STDERR.print "辞書の一覧取得に失敗しました (server=#{first_server})\n"
+  else
+    dict.each{|uuid,data|
+      print_data << "#{full_to_half(data['surface'])}\t#{data['pronunciation']}\t#{data['accent_type']}"
+    }
+  end
+  print_data.sort.each{|value|
+    print "#{value}\n"
+  }
+
+
+# サブコマンドが「add」の場合
+elsif mode == "add" then
+
+  # オプションが指定されていなかったら
+  if surface == "" or pron == "" or accent == -1 then
+    STDERR.print "Usage: #{__FILE__} add SURFACE PRONUNCIATION ACCENT_TYPE\n"
+    exit 1
+  end
+
+  # 読み方が全角カタカナでなかったらエラーにする
+  if pron !~ /\A[ァ-ヶー－]+\z/ then
+    STDERR.print "読み方は全角カタカナで入力してください\n"
+    exit 1
+  end
+
+  # アクセント核位置が整数でなかったらエラーにする
+  if accent.to_s !~ /^[0-9]+$/ then
+    STDERR.print "アクセント核位置は半角で整数を入力してください\n"
+    exit 1
+  end
+
+  debug_print("単語=#{surface} 読み=#{pron} アクセントタイプ=#{accent}")
+  # エンジンごとに処理
+  VOICEVOX_ENGINE.each{|server|
+    # 重複フラグを初期化
+    duplicate_flag = 0
+    # 現在登録されているかどうか調べる
+    dict = get_dict(server)
+    dict.each{|uuid,data|
+      if surface == data['surface'] then
+	duplicate_flag = 1
+        break
+      end
+    }
+    if duplicate_flag == 1 then
+      print "単語 \"#{full_to_half(surface)}\" はすでに追加されています (server=\"#{server}\")\n"
+    else
+      # 辞書に単語を追加
+      retval = add_dict(server,surface,pron,accent)
+      if retval == 0 then
+        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" を追加しました (server=\"#{server}\")\n"
+      else
+        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" の追加に失敗しました (server=\"#{server}\")\n"
+      end
+    end
+  }
+
+
+# サブコマンドが「listadd」の場合
+elsif mode == "listadd" then
+
+  # オプションが指定されていなかったら
+  if surface == "" or pron != "" or accent != -1 then
+    STDERR.print "Usage: #{__FILE__} listadd LISTFILE\n"
+    exit 1
+  end
+
+  # ファイル名が変数surfaceに入るのでそこから取り出す
+  listfile = surface
+
+  # リストファイルの中身を全て辞書登録する
+  mode_listadd(listfile)
+
+
+# サブコマンドが「mod」の場合
+elsif mode == "mod" then
+
+  # オプションが指定されていなかったら
+  if surface == "" or pron == "" or accent == -1 then
+    STDERR.print "Usage: #{__FILE__} mod SURFACE PRONUNCIATION ACCENT_TYPE\n"
+    exit 1
+  end
+  # 読み方が全角カタカナでなかったらエラーにする
+  if pron !~ /\A[ァ-ヶー－]+\z/ then
+    STDERR.print "読み方は全角カタカナで入力してください\n"
+    exit 1
+  end
+
+  # アクセント核位置が整数でなかったらエラーにする
+  if accent.to_s !~ /^[0-9]+$/ then
+    STDERR.print "アクセント核位置は半角で整数を入力してください\n"
+    exit 1
+  end
+
+  # UUIDを格納する変数を初期化
+  mod_uuid = ""
+  # エンジンごとに処理
+  VOICEVOX_ENGINE.each{|server|
+    # 現在登録されているUUIDを調べる
+    dict = get_dict(server)
+    dict.each{|uuid,data|
+      if surface == data['surface'] then
+        mod_uuid = uuid
+        break
+      end
+    }
+    # 単語が登録されていなかった場合
+    if mod_uuid == "" then
+      STDERR.print "単語 \"#{full_to_half(surface)}\" は辞書に登録されていません (server=#{server})\n"
+    # 単語が登録されていた場合
+    else
+      debug_print("UUID=#{mod_uuid}")
+      # 辞書の単語を修正
+      retval = mod_dict(server,mod_uuid,surface,pron,accent)
+      # メッセージ表示
+      if retval == 0 then
+        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" に更新しました (server=\"#{server}\")\n"
+      else
+        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" の更新に失敗しました (server=\"#{server}\")\n"
+      end
+    end
+  }
+
+
+# サブコマンドが「del」の場合
+elsif mode == "del" then
+
+  # オプションが指定されていなかったら
+  if surface == "" or pron != "" or accent != -1 then
+    STDERR.print "Usage: #{__FILE__} del SURFACE\n"
+    exit 1
+  end
+
+  # UUIDを格納する変数を初期化
+  mod_uuid = ""
+  # エンジンごとに処理
+  VOICEVOX_ENGINE.each{|server|
+    # 現在登録されているUUIDを調べる
+    dict = get_dict(server)
+    dict.each{|uuid,data|
+      if surface == data['surface'] then
+        mod_uuid = uuid
+        break
+      end
+    }
+    # 辞書に登録されていなかった場合
+    if mod_uuid == "" then
+      STDERR.print "単語 \"#{full_to_half(surface)}\" は辞書に登録されていません\n"
+    # 辞書に登録されていた場合
+    else
+      debug_print("UUID=#{mod_uuid}")
+      # 辞書の単語を削除
+      retval = del_dict(server,mod_uuid)
+      # メッセージ表示
+      if retval == 0 then
+        print "単語 \"#{full_to_half(surface)}\" を削除しました (server=\"#{server}\")\n"
+      else
+        print "単語 \"#{full_to_half(surface)}\" の削除に失敗しました (server=\"#{server}\")\n"
+      end
+    end
+  }
+
+
+# サブコマンドが「deleteall」の場合
+elsif mode == "deleteall" then
+
+  # オプションが指定されていなかったら
+  if surface != "" or pron != "" or accent != -1 then
+    STDERR.print "Usage: #{__FILE__} deleteall\n"
+    exit 1
+  end
+
+  # 全ての登録済み辞書を削除する
+  mode_deleteall()
+
+
+# サブコマンドが「rereg」の場合
+elsif mode == "rereg" then
+
+  # オプションが指定されていなかったら
+  if surface == "" or pron != "" or accent != -1 then
+    STDERR.print "Usage: #{__FILE__} rereg LISTFILE\n"
+    exit 1
+  end
+
+  # ファイル名が変数surfaceに入るのでそこから取り出す
+  listfile = surface
+
+  # 全ての登録済み辞書を削除する
+  retval = mode_deleteall()
+
+  # 削除時にエラーがあったら終了
+  if retval != 0 then
+    STDERR.print "辞書削除時にエラーが発生したため処理を中止します\n"
+    exit 1
+  end
+
+  # リストファイルの中身を全て辞書登録する
+  mode_listadd(listfile)
+
+
+# 存在しないサブコマンドが指定された場合
+else
+
+  STDERR.print "サブコマンド \"#{mode}\" には対応していません\n"
+  exit 1
+
+end
+

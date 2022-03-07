@@ -1,0 +1,22 @@
+#!/bin/bash
+
+cd $(dirname $0)
+
+case $1 in
+  start)
+    ../libexec/seqread.rb &
+    echo $! > ../var/run/seqread.pid
+    ;;
+  stop)
+    kill `cat ../var/run/seqread.pid`
+    rm -f ../var/run/seqread.pid
+    rm -f ../var/run/seqread.sock
+    ;;
+  status)
+    ps aux | grep seqread.rb | grep -v grep
+    ;;
+  *)
+    echo "Usage: $0 start|stop"
+    ;;
+esac
+

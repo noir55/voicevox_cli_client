@@ -1,0 +1,1480 @@
+#!/bin/env ruby
+
+# 引数のパースのため
+require 'optparse'
+
+# HTTPリクエストを実行するため
+require 'net/http'
+
+# URLエンコードを実行するため
+require 'cgi'
+
+# ファイル処理を行うため
+require 'fileutils'
+
+# JSON処理を行うため
+require 'json'
+
+# 再生コマンドを実行するため
+require "open3"
+
+# バージョン
+VERSION="1.1.8"
+
+
+#------
+# 設定
+#------
+
+# 設定ファイルを読み込む
+if File.exist?("#{__dir__}/../etc/config.rb")
+  require_relative '../etc/config.rb'
+else
+  STDOUT.print "設定ファイル \"#{__dir__}/../etc/config.rb\" が見つかりません"
+  exit 1
+end
+
+
+#----------
+# 関数定義
+#----------
+
+# デバッグメッセージを表示する関数
+def debug_print(message)
+  if @debug_flag == 1 then
+    STDERR.print "Debug: #{message}\n"
+  end
+end
+
+
+# 文字列をwavデータに変換する関数
+def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
+
+  # URLエンコード
+  enc_text = URI.encode(text)
+  # デバッグメッセージ
+  debug_print("enc_text=#{enc_text}")
+
+  if query_speaker == "" then
+    # デバッグメッセージ
+    debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker}\"")
+    # JSON取得のためのURLをセット
+    uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker}")
+  else
+    # デバッグメッセージ
+    debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}\"")
+    # JSON取得のためのURLをセット
+    uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}")
+  end
+
+  # JSONの取得
+  res = Net::HTTP.post_form(uri, 'body' => nil)
+  # デバッグメッセージ
+  #debug_print("res=#{res.body}")
+
+  # JSON取得に成功したら、音声データ変換を実行
+  if res.code == "200" then
+
+    # 音声補正
+    param_volume = sprintf("%0.2f", param_volume.to_f * VOLUME_CORRECT[speaker.to_i] )
+
+    # 各種パラメータがデフォルト値でない場合、値をセットする
+    if param_speed != 1.0 or param_pitch != 0.0 or param_intonation != 1.0 or param_volume != 1.0 then
+      # 各種パラメータをセット
+      json_hash = JSON.parse(res.body)
+      json_hash["speedScale"] = param_speed
+      json_hash["pitchScale"] = param_pitch
+      json_hash["intonationScale"] = param_intonation
+      json_hash["volumeScale"] = param_volume
+      res.body = JSON.generate(json_hash)
+    end
+
+    # デバッグメッセージ
+    debug_print("modified res=#{res.body}")
+    # JSONを音声データに変換
+    headers = { 'Content-Type' => 'application/json' }
+    uri = URI.parse("http://#{server}/")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.read_timeout = HTTP_TIMEOUT
+    # デバッグメッセージ
+    debug_print("URI=\"http://#{server}/synthesis?speaker=#{speaker}\"")
+    # 音声データを取得
+    voice = http.post("/synthesis?speaker=#{speaker}", res.body, headers)
+
+    # デバッグメッセージ
+    debug_print("リターンコード=#{voice.code} データサイズ=#{voice.body.size}")
+
+    # 音声データ変換に成功したら
+    if voice.code == "200" then
+      # 音声データを返す
+      return voice.body
+    # 音声データ変換に失敗したら
+    elsif voice.code == "500" then
+      STDERR.print "文字数が多すぎるため音声データ変換に失敗しました (ret=#{voice.code} json_size=#{res.body.length})\n"
+      return nil
+    else
+      STDERR.print "音声データ変換に失敗しました (ret=#{voice.code})\n"
+      return nil
+    end
+
+  # JSON取得に失敗したら
+  else
+    STDERR.print "クエリ作成に失敗しました (ret=#{res.code})\n"
+    return nil
+  end
+
+end
+
+
+# 文字列を2者の音声をモーフィングしたwavデータに変換する関数
+def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
+
+  # URLエンコード
+  enc_text = URI.encode(text)
+  # デバッグメッセージ
+  debug_print("enc_text=#{enc_text}")
+
+  if query_speaker == "" then
+    # デバッグメッセージ
+    debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker}\"")
+    # JSON取得のためのURLをセット
+    uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker}")
+  else
+    # デバッグメッセージ
+    debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}\"")
+    # JSON取得のためのURLをセット
+    uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}")
+  end
+
+  # JSONの取得
+  res = Net::HTTP.post_form(uri, 'body' => nil)
+  # デバッグメッセージ
+  debug_print("res=#{res.body}")
+
+  # JSON取得に成功したら、音声データ変換を実行
+  if res.code == "200" then
+
+    # 音声補正
+    param_volume = sprintf("%0.2f", param_volume.to_f * ( (VOLUME_CORRECT[base_speaker.to_i] * (1.0 - morph_rate.to_f)) + (VOLUME_CORRECT[target_speaker.to_i] * morph_rate.to_f) ) )
+
+    # 各種パラメータがデフォルト値でない場合、値をセットする
+    if param_speed != 1.0 or param_pitch != 0.0 or param_intonation != 1.0 or param_volume != 1.0 then
+      # 各種パラメータをセット
+      json_hash = JSON.parse(res.body)
+      json_hash["speedScale"] = param_speed
+      json_hash["pitchScale"] = param_pitch
+      json_hash["intonationScale"] = param_intonation
+      json_hash["volumeScale"] = param_volume
+      res.body = JSON.generate(json_hash)
+    end
+
+    # デバッグメッセージ
+    debug_print("modified res=#{res.body}")
+    # JSONを音声データに変換
+    headers = { 'Content-Type' => 'application/json' }
+    uri = URI.parse("http://#{server}/")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.read_timeout = HTTP_TIMEOUT
+    # デバッグメッセージ
+    debug_print("URI=\"http://#{server}//synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}\"")
+    # 音声データを取得
+    voice = http.post("/synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}", res.body, headers)
+
+    # デバッグメッセージ
+    debug_print("リターンコード=#{voice.code} データサイズ=#{voice.body.size}")
+
+    # 音声データ変換に成功したら
+    if voice.code == "200" then
+      # 音声データを返す
+      return voice.body
+    # 音声データ変換に失敗したら
+    elsif voice.code == "500" then
+      STDERR.print "文字数が多すぎるため音声データ変換に失敗しました (ret=#{voice.code} json_size=#{res.body.length}) json_size が 57400 程度より小さいとうまくいく可能性が高いです\n"
+      return nil
+    else
+      STDERR.print "音声データ変換に失敗しました (ret=#{voice.code})\n"
+      return nil
+    end
+
+  # JSON取得に失敗したら
+  else
+    STDERR.print "クエリ作成に失敗しました (ret=#{res.code})\n"
+    return nil
+  end
+
+end
+
+
+# 置換リストを読み込む関数
+def load_replace_list()
+
+  # 置換前文字列と置換後対応を格納するハッシュ
+  repl_hash = Hash.new
+
+  # dict.datファイルがあれば読み込む
+  if File.exist?("#{__dir__}/../etc/replace.list") then
+
+    # １行づつ処理
+    File.open("#{__dir__}/../etc/replace.list"){|f|
+      f.each_line{|line|
+
+        # 行頭が「#」以外の行を置換リストとして読み込む
+        if line !~ /^#/ then
+
+          # タブ区切りで、タブ前を文字列、タブ後ろを読みとしてハッシュに格納
+          if line =~ /^(.+)\t(.+)$/ then
+            repl_hash[$1] = $2
+          end
+
+        end
+      }
+    }
+  end
+
+  # ハッシュを返す
+  return repl_hash
+end
+
+
+# 音声データを再生する関数
+def play_wav(wavdata, rdp_flag)
+
+  debug_print("再生します (datasize=#{wavdata.size})")
+
+  # aplayコマンドで再生する場合
+  if PLAY_CMD == "aplay" then
+
+    # オプションで「--rdp」が指定されている場合
+    if rdp_flag == 1 then
+      play_cmd = "aplay -D pulse"
+    # オプションで「--no-rdp」が指定されている場合
+    elsif rdp_flag == 2 then
+      play_cmd = "aplay -D #{APLAY_DEVICE}"
+    # オプションで指定されていない場合は自動判別
+    else
+      # XRDP上のターミナルでない場合
+      if ENV['XRDP_PULSE_SINK_SOCKET'].nil? or ENV['XRDP_PULSE_SINK_SOCKET'].empty? then
+        play_cmd = "aplay -D #{APLAY_DEVICE}"
+      # XRDP上のターミナルの場合
+      else
+        play_cmd = "aplay -D pulse"
+      end
+    end
+
+  # sox(play)コマンドで再生する場合
+  elsif PLAY_CMD == "sox" then
+
+    # オプションで「--no-rdp」が指定されている場合
+    if rdp_flag == 2 then
+      # 環境変数「AUDIODEV」で再生するデバイスを指定
+      ENV['AUDIODEV'] = SOX_DEVICE
+    # オプションで指定されていない場合は自動判別
+    elsif rdp_flag == 0 then
+      # XRDP上のターミナルでない場合
+      if ENV['XRDP_PULSE_SINK_SOCKET'].nil? or ENV['XRDP_PULSE_SINK_SOCKET'].empty? then
+        ENV['AUDIODEV'] = SOX_DEVICE
+      end
+    end
+
+    # 再生コマンド
+    play_cmd = "play -"
+
+  # 再生コマンドの指定が「aplay」「sox」でもない場合はエラーとする
+  else
+    STDERR.print "再生コマンドの指定が正しくありません\n"
+    exit 1
+  end
+
+  # 再生コマンドにパイプで音声データを渡して実行
+  Open3.capture3(play_cmd, :stdin_data=>wavdata)
+
+end
+
+
+# wavデータの配列を結合して1つのwavデータに変換する関数
+def unite_wav(wavs,interval_time)
+
+  # デバッグメッセージ
+  debug_print("#{wavs.length} つの WAV データを #{interval_time} 秒間隔で結合します")
+
+  # 出力データとサイズを格納する変数
+  output_wav = Array.new
+  output_wav_size = 0
+
+  # データが複数あれば、間に挟む無音波形データを作成(16bit,24kHz のデータを生成する)
+  if wavs.length > 1 then
+
+    # データを格納する変数
+    zero_data = Array.new
+    # データの個数を求める
+    num = (24000 * interval_time).floor.to_i
+    # 求めた個数分繰り返し
+    num.times{|n|
+      zero_data << 0
+    }
+    # バイナリデータの作成(16bit signed shortに変換)
+    silent_interval = zero_data.pack('s*')
+    # デバッグメッセージ
+    debug_print("silent_interval.size=#{silent_interval.size}")
+
+    wavs.each {|data|
+
+      # ヘッダ情報(12バイト)
+      #header = data.slice(0,12)
+      #riff = header.slice(0,4)
+      #data_size = header.slice(4,4).unpack('V')[0].to_i
+      #wave = header.slice(8,4)
+
+      # デバッグメッセージ
+      #debug_print("riff=#{riff} data_size=#{data_size} wave=#{wave}")
+
+      # fmt チャンクの読み出し(普通は8バイト+データ16バイト)
+      chunk = data.slice(12,8)
+      chunk_name = chunk.slice(0,4)
+      chunk_size = chunk.slice(4,4).unpack("V")[0].to_i
+      chunk_data = data.slice(20,chunk_size)
+      format_id = chunk_data.slice(0,2).unpack('c')[0]
+      format_channel = chunk_data.slice(2,2).unpack('c')[0]
+      format_hz = chunk_data.slice(4,4).unpack('V').join.to_i
+      format_bytePerSec = chunk_data.slice(8,4).unpack('V').join.to_i
+      format_blockSize = chunk_data.slice(12,2).unpack('c')[0]
+      format_bitPerSample = chunk_data.slice(14,2).unpack('c')[0]
+
+      # fmt チャンクは結合後も変わらないため、使いまわす用に丸ごとグローバル変数に保存しておく
+      @fmt_chunk = data.slice(12, chunk_size+8)
+
+      # デバッグメッセージ
+      debug_print("name=#{chunk_name} size=#{chunk_size}\nid=#{format_id} channel=#{format_channel} hz=#{format_hz} bytePerSec=#{format_bytePerSec} blockSize=#{format_blockSize} bitPerSample=#{format_bitPerSample}")
+
+      # data チャンクの読み出し位置(dataチャンクに音声データが入っている)
+      chunk_start = 20 + chunk_size.to_i
+
+      # data チャンクの読み出し
+      chunk2 = data.slice(chunk_start,8)
+      chunk_name2 = chunk2.slice(0,4)
+      chunk_size2 = chunk2.slice(4,4).unpack("V")[0].to_i
+      chunk_data2 = data.slice(chunk_start+8,chunk_size2)
+
+      # デバッグメッセージ
+      debug_print("name2=#{chunk_name2} size2=#{chunk_size2}")
+
+      # 先頭以外の場合、無音データを挿入
+      if output_wav.length > 0 then
+        output_wav << silent_interval
+        output_wav_size += silent_interval.size
+      end
+
+      # 音声データを追加
+      output_wav << chunk_data2
+
+      # 音声データサイズを足す
+      output_wav_size += chunk_size2.to_i
+
+      # デバッグメッセージ
+      debug_print("output_wav_size=#{output_wav_size}")
+    }
+
+    # 出力データの作成
+
+    # サイズ計算
+    header_file_size = 4
+    # fmt チャンクサイズを追加
+    header_file_size += 8 + 16
+    # data チャンクサイズを追加
+    header_file_size += 8 + output_wav_size
+
+    # ヘッダ、fmtチャンク、dataチャンクを結合
+    outdata = 'RIFF' + [header_file_size].pack('V') + 'WAVE'
+    outdata += @fmt_chunk
+    outdata += 'data' + [output_wav_size].pack('V') + output_wav.join
+
+    return outdata
+
+  # データが1つしかない場合はそのまま返す
+  else
+    return wavs[0]
+  end
+
+end
+
+
+# wavファイルをmp3ファイルにコンバートする関数
+def conv2mp3(conv_command, input_wav_file, output_mp3_file)
+
+  # 変換コマンドがsoxだったら
+  if conv_command == "sox" then
+
+    # soxコマンドを使用して変換する
+    system("sox #{input_wav_file}.wav #{SOX_OPT1} #{output_mp3_file}.mp3 #{SOX_OPT2} >/dev/null 2>&1")
+
+  # 変換コマンドがffmpegだったら
+  elsif conv_command == "ffmpeg" then
+
+    # ffmpegコマンドを使用して変換する
+    system("ffmpeg -i #{input_wav_file}.wav #{FFMPEG_OPT} #{output_mp3_file}.mp3 >/dev/null 2>&1")
+
+  # 変換コマンドがそれ以外だったら
+  else
+
+    STDERR.print "mp3変換コマンドとして\"#{conv_command}\"は利用できません\n"
+    exit 1
+
+  end
+
+  # 変換が成功したら
+  if $?.exitstatus == 0 then
+    # wavファイルを削除
+    FileUtils.rm("#{input_wav_file}.wav")
+    return 0
+  else
+    STDERR.print "\"#{input_wav_file}.wav\" から \"#{output_mp3_file}.mp3\" への変換に失敗しました\n"
+    return 1
+  end
+
+end
+
+
+# スレッドで実行する処理
+def thread_proc( server, text, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag )
+
+  # テキストはコピーしてから処理(スレッド失敗時に元のテキストで処理したいため)
+  proc_text = text.clone
+
+  begin
+
+    # 文頭の「#{s1,q8}」のような記述から声の種類のパラメータを変更
+    if proc_text =~ /^ *#\{ *([a-zA-Z0-9,\-\. ]+) *\} */ then
+
+      speaker_element = Array.new
+      speaker_element = $1.split(",")
+
+      # マッチングした記述を順に処理
+      speaker_element.each {|temp|
+
+        # もし、「s<数字>」だったら声の種類を変更
+        if temp =~ /^ *s([0-9]+) *$/ then
+          speaker = $1.to_i
+        # もし、「q<数字>」だったら、クエリの声の種類を変更
+        elsif temp =~ /^ *q([0-9]+) *$/ then
+          query_speaker = $1.to_i
+        # もし、「qx」「qX」だったら、クエリの声の種類を削除
+        elsif temp =~ /^ *q[xX] *$/ then
+          query_speaker = ""
+        # もし、「m<数字>」だったら、モーフィング先の声の種類を変更
+        elsif temp =~ /^ *m([0-9]+) *$/ then
+          morph_speaker = $1.to_i
+        # もし、「mx」「mX」だったら、モーフィング先の声の種類を削除
+        elsif temp =~ /^ *m[xX] *$/ then
+          morph_speaker = ""
+          morph_rate = ""
+        # もし、「r<小数>」だったら、モーフィングレートを変更
+        elsif temp =~ /^ *r([0-9\.]+) *$/ then
+          morph_rate = $1.to_f
+        # もし、「rx」「rX」だったら、モーフィングレートを削除
+        elsif temp =~ /^ *r[xX] *$/ then
+          morph_rate = ""
+        # もし、「S<小数>」だったら、スピードスケールを変更
+        elsif temp =~ /^ *S([0-9\.]+) *$/ then
+          param_speed = $1.to_f
+        # もし、「Sx」「SX」だったら、スピードスケールを初期化
+        elsif temp =~ /^ *S[xX] *$/ then
+          param_speed = 1.0
+        # もし、「P<小数>」だったら、ピッチスケールを変更
+        elsif temp =~ /^ *P(\-?[0-9\.]+) *$/ then
+          param_pitch = $1.to_f
+        # もし、「Px」「PX」だったら、ピッチスケールを初期化
+        elsif temp =~ /^ *P[xX] *$/ then
+          param_pitch = 0.0
+        # もし、「I<小数>」だったら、イントネーションスケールを変更
+        elsif temp =~ /^ *I([0-9\.]+) *$/ then
+          param_intonation = $1.to_f
+        # もし、「Ix」「IX」だったら、イントネーションスケールを初期化
+        elsif temp =~ /^ *I[xX] *$/ then
+          param_intonation = 1.0
+        # もし、「V<小数>」だったら、ボリュームスケールを変更
+        elsif temp =~ /^ *V([0-9\.]+) *$/ then
+          param_volume = $1.to_f
+        # もし、「Vx」「VX」だったら、ボリュームスケールを初期化
+        elsif temp =~ /^ *V[xX] *$/ then
+          param_volume = 1.0
+        end
+
+      }
+
+      # 設定部分を削除
+      proc_text.sub!(/^ *#\{ *([a-zA-Z0-9,\-\. ]+) *\} */, '')
+
+    end
+
+    # 改行を削除
+    proc_text.chomp!
+
+    # スペース、タブ以外の文字があればwavデータに変換する
+    if proc_text != /^ *$/ then
+
+      # 詳細メッセージ
+      if verbous_flag == 1 then
+        STDERR.print("        conv_text=\"#{proc_text}\" srv=\"#{server}\"\n")
+      end
+
+      # モーフィングする場合
+      if morph_speaker != "" and morph_rate != "" then
+        wavdata = text2wav_morph(server, proc_text, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
+      # モーフィングしない場合
+      else
+        wavdata = text2wav(server, proc_text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
+      end
+
+    end
+
+    return wavdata
+
+  rescue => e
+
+    # エラーが発生したら nil を返す
+    STDERR.print "サーバとの通信でエラーが発生しました (e=\"#{e.message}\")\n"
+    return nil
+
+  end
+end
+
+
+#----------
+# 処理開始
+#----------
+
+# デバッグフラグを初期化
+@debug_flag = 0
+
+# 声の種類のデフォルト値をセット
+speaker = SPEAKER
+
+# クエリ時の声の種類を初期化
+query_speaker = ""
+
+# モーフィング対象の声の種類
+morph_speaker = ""
+morph_rate = ""
+
+# 文章間の間隔のデフォルト値をセット
+interval_time = INTERVAL
+
+# 段落間の間隔のデフォルト値をセット
+paragraph_interval_time = PARAGRAPH_INTERVAL
+
+# 各種パラメータ
+param_speed = 1.0
+param_pitch = 0.0
+param_intonation = 1.0
+param_volume = 1.0
+
+# 入力ファイルを格納する変数
+message_file = ""
+
+# 標準出力に音声データを出力するフラグ
+stdout_flag = 0
+
+# 入力テキストをそのまま読み上げるフラグ
+raw_flag = 0
+
+# 再生フラグを初期化
+play_flag = 0
+
+# RDPフラグを初期化
+rdp_flag = 0
+
+# mp3変換フラグを初期化
+mp3_flag = 0
+
+# 標準出力なしフラグを初期化
+quiet_flag = 0
+
+# 出力を増やすフラグを初期化
+verbous_flag = 0
+
+# サーバのチェックを行うフラグ
+check_flag = 0
+
+# 引数で出力ファイル名が指定された場合にファイル名を格納する変数
+output_filename = ""
+
+# 1つのファイルに出力させるフラグを初期化
+single_output_flag = 0
+
+# オプションで指定されていたら上書き
+opt = OptionParser.new
+opt.on('-f', '--file TEXT_FILE', 'テキストファイルの内容を音声変換します'){|v| message_file = v }
+opt.on('-o', '--output FILENAME_PREFIX', '出力ファイル名を指定します (拡張子は不要)') {|v| output_filename = v }
+opt.on('-1', '--single', 'テキスト全体を1つのファイルに出力します') {|v| single_output_flag = 1 }
+opt.on('-p', '--play', 'ファイルに出力せず、全ての音声変換後に読み上げを行います') {|v| play_flag = 1 }
+opt.on('-s', '--speaker NUMBER', '声の種類を指定します (0-14)') {|v| speaker = v }
+opt.on('-m', '--morph_speaker NUMBER,RATE', 'モーフィング先の声の種類 (0-14) と、モーフィング率 (0.1-0.9) を指定します') {|v| morph_speaker,morph_rate=v.split(",") }
+opt.on('--query NUMBER', 'クエリ時の声の種類を指定します (0-14)') {|v| query_speaker = v }
+opt.on('-i', '--interval INTERVAL_SECOND', '文章間の時間を指定します (秒)'){|v| interval_time = v.to_f }
+opt.on('-I', '--paragraph-interval INTERVAL_SECOND', '文節間の時間を指定します (秒)'){|v| paragraph_interval_time = v.to_f }
+opt.on('-q', '--quiet', '標準出力に何も表示しません') {|v| quiet_flag = 1 }
+opt.on('-v', '--verbous', '標準出力に読み上げエンジンに渡される文字列も表示します') {|v| verbous_flag = 1 }
+opt.on('--stdout', '全ての音声変換後に音声データを標準出力に出力') {|v| stdout_flag = 1 }
+opt.on('--rdp', '再生時、RDP の音声デバイスから再生します') {|v| rdp_flag = 1 }
+opt.on('--no-rdp', '再生時、通常の音声デバイスから再生します') {|v| rdp_flag = 2 }
+opt.on('--mp3', 'ファイルを mp3 に変換して保存します (対応した sox または ffmpeg が必要です)') {|v| mp3_flag = 1 }
+opt.on('--raw', '置換リストやスペース削除などの処理を行わず、入力テキストをそのまま読み上げます') {|v| raw_flag = 1 }
+opt.on('--speed SPEED_SCALE', 'スピードスケールを指定します (default=1.0)'){|v| param_speed = v.to_f }
+opt.on('--pitch PITCH_SCALE', 'ピッチスケールを指定します (default=0.0)'){|v| param_pitch = v.to_f }
+opt.on('--intonation INTONATION_SCALE', 'イントネーションスケールを指定します (default=1.0)'){|v| param_intonation = v.to_f }
+opt.on('--volume VOLUME_SCALE', 'ボリュームスケールを指定します (default=1.0)'){|v| param_volume = v.to_f }
+opt.on('--debug', 'デバッグメッセージを出力します') {|v| @debug_flag = 1 }
+opt.on('--check', 'エンジンの状態をチェックします') {|v| check_flag = 1 }
+opt.on('--version', 'バージョンを出力します') {|v| print "#{VERSION}\n" ; exit }
+opt.parse!(ARGV)
+
+# デバッグメッセージ表示
+debug_print("処理開始")
+debug_print("message_file=#{message_file}")
+debug_print("play_flag=#{play_flag}")
+debug_print("mp3_flag=#{mp3_flag}")
+debug_print("quiet_flag=#{quiet_flag}")
+debug_print("output_filename=#{output_filename}")
+
+# VOICEVOX Engineをチェックするフラグが1だったら
+if check_flag == 1 then
+  debug_print("エンジンの状態をチェックします")
+  VOICEVOX_ENGINE.each{|server|
+    uri = URI.parse("http://#{server}/version")
+    http = Net::HTTP.new(uri.host, uri.port)
+    res = nil
+    begin
+      Timeout.timeout(5){
+        res = http.get(uri)
+      }
+    rescue Timeout::Error
+      res = nil
+    end
+    if (not res.nil?) and res.body =~ /^\"[0-9]+\.[0-9]+\.[0-9]+\"$/ then
+      print "voicevox engine=#{server} version=#{res.body.chomp} status=OK\n"
+    else
+      print "voicevox engine=#{server} status=NG\n"
+    end
+  }
+  exit
+end
+
+# speaker の値チェック
+debug_print("speaker=#{speaker}")
+if not speaker =~ /^([0-9]|1[0-4])$/ then
+  STDERR.print "\"-s (--speaker)\" の値は、0～14 のいずれかを指定してください\n"
+  exit 1
+end
+
+# query_speaker の値チェック
+if query_speaker != "" then
+  debug_print("query_speaker=#{query_speaker}")
+  if not query_speaker =~ /^([0-9]|1[0-4])$/ then
+    STDERR.print "\"--query\" の値は、0～14 のいずれかを指定してください\n"
+    exit 1
+  end
+end
+
+# morph_speaker の値チェック
+debug_print("morph_speaker=#{morph_speaker}, morph_rate=#{morph_rate}")
+if morph_speaker != "" or morph_rate != "" then
+  if (not morph_speaker =~ /^([0-9]|1[0-4])$/) or (not morph_rate =~ /^[01]\.[0-9]$/) then
+    STDERR.print "\"-m (--morph_speaker)\" の値は、0～14 のいずれかと、0.0～1.0 のいずれかの値を「,(カンマ)」でつないだ値にしてください\n"
+    exit 1
+  end
+  if morph_rate.to_f > 1.0 then
+    STDERR.print "\"-m (--morph_speaker)\" の値は、0～14 のいずれかと、0.0～1.0 の間の値を「,(カンマ)」でつないだ値にしてください\n"
+    exit 1
+  end
+end
+
+# interval の値チェック
+debug_print("interval_time=#{interval_time}")
+if interval_time =~ /^[0-9\.]$/ then
+  STDERR.print "\"-i (--interval)\" の値は、数値(小数点可)を指定してください\n"
+  exit 1
+elsif interval_time.to_f < 0 then
+  STDERR.print "\"-i (--interval)\" は正の値を指定してください\n"
+  exit 1
+end
+
+# 再生フラグが1の場合
+if play_flag == 1 then
+  # aplayコマンドを使用する場合
+  if PLAY_CMD == "aplay" then
+    # aplayコマンドがあるかチェック
+    num = `which aplay | wc -l 2>/dev/null`
+    if num.to_i <= 0 then
+      STDERR.print "音声を再生するためのコマンド \"aplay\" が見つからないため処理を終了します\n"
+      exit 1
+    end
+  # playコマンドを使用する場合
+  elsif PLAY_CMD == "sox" then
+    # playコマンドがあるかチェック
+    num = `which play | wc -l 2>/dev/null`
+    if num.to_i <= 0 then
+      STDERR.print "音声を再生するためのコマンド \"play\" が見つからないため処理を終了します\n"
+      exit 1
+    end
+  # 指定が間違っている場合
+  else
+    STDERR.print "PLAY_CMD 設定が正しくありません。\"aplay\" または \"sox\" を指定してください\n"
+    exit 1
+  end
+end
+
+# mp3フラグが1の場合
+if mp3_flag == 1 then
+  # soxコマンドがあるかチェック
+  num = `which sox | wc -l 2>/dev/null`
+  # soxコマンドが見つかった場合
+  if num.to_i > 0 then
+    conv_command = "sox"
+  # soxコマンドが見つからない場合
+  else
+    # ffmpegコマンドがあるかチェック
+    num = `which ffmpeg | wc -l 2>/dev/null`
+    # ffmpegコマンドが見つかった場合
+    if num.to_i > 0 then
+      conv_command = "ffmpeg"
+    # ffmpegコマンドも見つからない場合
+    else
+      STDERR.print "コマンド \"sox\" か \"ffmpeg\" がともに見つからないため、mp3 での出力はできません\n"
+      exit 1
+    end
+  end
+
+  # 変換コマンドが見つかった場合、一時的に生成するwavファイル名を決めて変数temp_outputに入れる
+  if num.to_i > 0 then
+    # ランダム文字列を生成
+    o = [('a'..'z'), ('A'..'Z'), ('0'..'9')].map { |i| i.to_a }.flatten
+    string = (0...8).map { o[rand(o.length)] }.join
+    # 一時ファイル名
+    temp_output = ".#{string}"
+    # デバッグ表示
+    debug_print("temp filename = #{temp_output}.wav")
+  end
+end
+
+# 入力データを格納する変数
+input = ""
+
+# 出力ファイル名を格納する変数
+outfilename = OUTFILENAME
+
+# テキストデータがパイプで渡された場合
+if File.pipe?(STDIN) then
+
+    # デバッグメッセージ
+    debug_print("パイプからメッセージを読み込みます")
+
+    # パイプまたはリダイレクトで渡されたデータをすべて読み込む
+    while str = $stdin.gets
+      input << str
+    end
+    # 標準入力をttyに切り替える
+    #$stdin.reopen('/dev/tty')
+
+# テキストデータがファイルで渡された場合
+elsif message_file != "" then
+
+  # デバッグメッセージ
+  debug_print("ファイル\"#{message_file}\"からメッセージを読み込みます")
+
+  # テキストファイルが存在すれば中身を読み込む
+  if File.exist?(message_file) then
+
+    f = File.open(message_file)
+    input = f.read
+    f.close
+
+    # ファイル名から「.txt」を取り除いたものを取得
+    outfilename = File.basename(message_file, ".txt")
+
+  # テキストファイルが存在しない場合はエラーを表示して終了
+  else
+
+    STDERR.print "ファイル \"#{message_file}\" が存在しません\n"
+    exit 1
+
+  end
+
+# ファイルでもパイプでもない場合はコマンドオプションからテキストデータを読み込む
+else
+
+  # デバッグメッセージ
+  debug_print("引数からメッセージを読み込みます")
+
+  # 引数をチェック
+  ARGV.each{|strs|
+    if input == "" then
+      input = strs
+    else
+      input = "#{input}\n#{strs}"
+    end
+  }
+
+end
+
+# もし、オプションで出力ファイル名が指定されていたらそれに置き換え
+if output_filename != "" then
+  # デバッグメッセージ
+  debug_print("出力ファイル名の接頭辞を\"#{output_filename}\"に変更します")
+  outfilename = output_filename
+end
+
+# 変数の初期化
+temp_text = ""
+conv_text = Array.new
+
+# コメントアウト中であることを示すフラグ
+comment_flag = 0
+
+# 読み込んだテキストファイルを1行ごとに処理
+input.each_line {|line|
+
+  # 行頭の全角、半角スペース、タブは削除
+  line.sub!(/^　 \t+/, '')
+  # 行末の全角、半角スペース、タブは削除
+  line.sub!(/　 \t+$/, '')
+
+  # もし「//」で始まっているか、「/*」で始まり「*/」で終わっている行はコメントとして無視する
+  if line =~ /^\/\// or line =~ /^\/\*.*\*\/$/ then
+    next
+  # もし、「/*」で始まっていたらコメントアウト開始
+  elsif line =~ /^\/\*/ then
+    comment_flag = 1
+    next
+  # もし、コメントアウト中で「*/」で終わっていたらコメントアウト終了
+  elsif comment_flag == 1 and line =~ /\*\/$/ then
+    comment_flag = 0
+    next
+  end
+
+  # コメントアウト中であればその行は無視する
+  if comment_flag == 1 then
+    next
+  end
+
+  # 空行が出てきたら
+  if line =~ /^$/ then
+
+    # temp_textが空でなければ、配列に入れる
+    if temp_text != "" then
+      conv_text << temp_text
+      temp_text = ""
+    end
+
+  # 空行でなければ
+  else
+
+    # temp_textに格納
+    temp_text += "#{line}"
+
+  end
+}
+
+
+# 最後の行が文字列だったら変換する配列に追加
+if temp_text != "" then
+  conv_text << temp_text
+end
+
+# デバッグメッセージ
+debug_print("conv_text=#{conv_text}")
+
+# 変換テキストを格納するハッシュを初期化
+input_text = Hash.new
+
+# オリジナルのテキストを格納するハッシュを初期化
+orig_text = Hash.new
+
+# インデックスを初期化
+i = 0
+
+# 配列を1つづつ処理
+conv_text.each{|text|
+
+  # インデックスを初期化
+  j = 0
+
+  # 文章を格納する配列
+  text_part = Array.new
+
+  # 「。」または改行で区切って配列に入れる (区切り文字「。」「\n」「?」は消さない)
+  text_part = text.split(/(?<=。|\n|\?|？)/)
+
+  # 空の要素があれば削除
+  text_part.delete("")
+
+  # 改行だけの要素があれば削除
+  text_part.delete("\n")
+
+  # 分割したそれぞれで処理
+  text_part.each_with_index {|value,index|
+
+    # orig_text ハッシュに格納
+    orig_text["#{i}-#{j}"] = text_part[index]
+
+    # 文頭に「#{s1,q8}」のような記述があったら声の種類のパラメータを変更
+    if text_part[index] =~ /^ *#\{ *([a-zA-Z0-9,\. ]+) *\} */ then
+
+      speaker_element = Array.new
+      speaker_element = $1.split(",")
+
+      # マッチングした記述を順に処理
+      speaker_element.each {|temp|
+
+        # もし、「s<数字>」だったら声の種類を変更
+        if temp =~ /^ *s([0-9]+) *$/ then
+          speaker = $1.to_i
+        # もし、「sr」「sR」だったら声の種類をランダムに設定
+        elsif temp =~ /^ *s[rR] *$/ then
+          # 配列からランダムに1つの値を取り出す
+          speaker = [0,1,2,3,4,5,6,7,8,8,8,8,9,9,9,9,10,10,10,10,11,11,11,11,12,12,12,12,13,13,13,13,14,14,14,14].sample
+        # もし、「q<数字>」だったら、クエリの声の種類を変更
+        elsif temp =~ /^ *q([0-9]+) *$/ then
+          query_speaker = $1.to_i
+        # もし、「qx」「qX」だったら、クエリの声の種類を削除
+        elsif temp =~ /^ *q[xX] *$/ then
+          query_speaker = ""
+        # もし、「m<数字>」だったら、モーフィング先の声の種類を変更
+        elsif temp =~ /^ *m([0-9]+) *$/ then
+          morph_speaker = $1.to_i
+        # もし、「mx」「mX」だったら、モーフィング先の声の種類を削除
+        elsif temp =~ /^ *m[xX] *$/ then
+          morph_speaker = ""
+        # もし、「r<小数>」だったら、モーフィングレートを変更
+        elsif temp =~ /^ *r([0-9\.]+) *$/ then
+          morph_rate = $1.to_f
+        # もし、「rx」「rX」だったら、モーフィングレートを削除
+        elsif temp =~ /^ *r[xX] *$/ then
+          morph_rate = ""
+        # もし、「S<小数>」だったら、スピードスケールを変更
+        elsif temp =~ /^ *S([0-9\.]+) *$/ then
+          param_speed = $1.to_f
+        # もし、「Sx」「SX」だったら、スピードスケールを初期化
+        elsif temp =~ /^ *S[xX] *$/ then
+          param_speed = 1.0
+        # もし、「P<小数>」だったら、ピッチスケールを変更
+        elsif temp =~ /^ *P\-?([0-9\.]+) *$/ then
+          param_pitch = $1.to_f
+        # もし、「Px」「PX」だったら、ピッチスケールを初期化
+        elsif temp =~ /^ *P[xX] *$/ then
+          param_pitch = 0.0
+        # もし、「I<小数>」だったら、イントネーションスケールを変更
+        elsif temp =~ /^ *I([0-9\.]+) *$/ then
+          param_intonation = $1.to_f
+        # もし、「Ix」「IX」だったら、イントネーションスケールを初期化
+        elsif temp =~ /^ *I[xX] *$/ then
+          param_intonation = 1.0
+        # もし、「V<小数>」だったら、ボリュームスケールを変更
+        elsif temp =~ /^ *V([0-9\.]+) *$/ then
+          param_volume = $1.to_f
+        # もし、「Vx」「VX」だったら、ボリュームスケールを初期化
+        elsif temp =~ /^ *V[xX] *$/ then
+          param_volume = 1.0
+        end
+
+      }
+
+      # 設定部分を削除
+      text_part[index].sub!(/^ *#\{ *([a-zA-Z0-9,\. ]+) *\} */, '')
+
+    end
+
+    # もし、タブとスペース以外の文字が残っていれば
+    if text_part[index] !~ /^[ \t\r\n]+$/ then
+
+      # 文頭に埋め込む文字列を作成
+      head_str = "s#{speaker}"
+
+      # 声の種類
+      if query_speaker == "" then
+        head_str += ",qX"
+      else
+        head_str += ",q#{query_speaker.to_s}"
+      end
+
+      # モーフィング先の声の種類
+      if morph_speaker == "" then
+        head_str += ",mX"
+      else
+        head_str += ",m#{morph_speaker.to_s}"
+      end
+
+      # モーフィングレート
+      if morph_rate == "" then
+        head_str += ",rX"
+      else
+        head_str += ",r#{morph_rate.to_s}"
+      end
+
+      # 各種パラメータ
+      head_str += ",S#{param_speed.to_s}"
+      head_str += ",P#{param_pitch.to_s}"
+      head_str += ",I#{param_intonation.to_s}"
+      head_str += ",V#{param_volume.to_s}"
+
+      # 先頭に埋め込む
+      text_part[index] =  "#\{#{head_str}\} #{value}"
+
+      # input_text ハッシュに格納
+      input_text["#{i}-#{j}"] = text_part[index]
+
+      # インデックスを増加
+      j = j + 1
+    end
+  }
+
+
+  # 文字列をそのまま読み上げるフラグが0なら
+  if raw_flag == 0 then
+
+    # 置換リストを読み込む
+    repl_hash = load_replace_list()
+
+      # 文字列の置換処理を実施
+      input_text.each {|ikey,ivalue|
+
+      # 置換リストにある言葉を置き換え
+      repl_hash.each{|key,value|
+        # マッチング文字列に「()」、置換後の文字列に「${<数字>}」がある場合に、マッチした文字列に置き換える
+        if input_text[ikey] =~ /#{key}/ then
+          # マッチング文字列に「()」記述があり、$1、$2などの変数があればmatch_str配列に格納する
+          match_str = Array.new
+          i = 1
+          while true do
+            # $<数字> 変数があれば、配列に追加
+            eval("match_str[i] = $#{i} if (not $#{i}.nil?)")
+            debug_print("match_str[#{i}] = #{match_str[i]}")
+            if match_str[i].nil? then
+              break
+            end
+            i += 1
+          end
+          # 置換リストの置換後の値に${<数字>}があれば、match_str内の文字列に置き換え
+          i = 1
+          while true do
+            if match_str[i].nil? then
+              break
+            end
+            value.gsub!(/\$\{#{i}\}/, match_str[i])
+            i += 1
+          end
+          debug_print("置換後文字列=#{value}")
+        end
+        # 置換処理を実行
+        input_text[ikey].gsub!(/#{key}/,value)
+      }
+
+      # 全角スペース、半角スペース、タブは1つの半角スペースに置き換える
+      input_text[ikey].gsub!(/[　 \t]+/, ' ')
+      # 文頭の半角スペースは削除
+      input_text[ikey].sub!(/^ +/, '')
+      # 文末の半角スペースは削除
+      input_text[ikey].sub!(/ +$/, '')
+      # 文中の半角カナを全角カナに変換
+      input_text[ikey] = input_text[ikey].gsub(/[\uFF61-\uFF9F]+/) {|strng| strng.unicode_normalize(:nfkc) }
+      # 文中の全角英数字を半角英数字に変換
+      input_text[ikey] = input_text[ikey].tr('０-９ａ-ｚＡ-Ｚ','0-9a-zA-Z')
+      # 文中の全角記号を半角記号に変換
+      input_text[ikey] = input_text[ikey].tr('　！-～',' !-~')
+
+      # 文中の全角文字と半角英数字間の半角スペースを削除
+      if input_text[ikey] =~ /[^\x01-\x7E] +[A-Za-z0-9]+/ then
+        input_text[ikey].gsub!( /([^\x01-\x7E]) +([A-Za-z0-9]+)/, "\\1\\2")
+      end
+      # 文中の半角英数字と全角文字間の半角スペースを削除
+      if input_text[ikey] =~ /[A-Za-z0-9]+ +[^\x01-\x7E]/ then
+        input_text[ikey].gsub!( /([A-Za-z0-9]+) +([^\x01-\x7E])/, "\\1\\2")
+      end
+      ## 全角文字同士間のスペースは、意図的に区切りとして入れられていることが多そうなので、コメントアウトしておく
+      ## 文中の全角文字と全角文字間の半角スペースを削除(1文字おきにスペースがあると削除漏れがおきるので2回実行)
+      #if input_text[ikey] =~ /[^\x01-\x7E] +[^\x01-\x7E]/ then
+      #  input_text[ikey].gsub!( /([^\x01-\x7E]) +([^\x01-\x7E])/, "\\1\\2")
+      #  input_text[ikey].gsub!( /([^\x01-\x7E]) +([^\x01-\x7E])/, "\\1\\2")
+      #end
+      # 数字の区切りに使われるカンマは削除
+      if input_text[ikey] =~ /[0-9]+,[0-9][0-9][0-9]/ then
+        input_text[ikey].gsub!( /([0-9]),([0-9][0-9][0-9])/, "\\1\\2")
+      end
+
+    }
+  end
+
+  # インデックスを増やす
+  i = i + 1
+}
+
+
+# 最終的に出力するWavデータを格納する配列
+output_wavdata = Array.new
+
+# スレッドを格納するハッシュを初期化
+threads = Array.new
+
+# スレッドが処理中の input_text のキーと文字列を格納する配列
+thread_key = Array.new
+thread_text = Array.new
+
+# スレッドが使用中のサーバ(エンジン)のインデックスを格納する配列
+thread_server = Array.new
+
+# 使用されていないサーバ(エンジン)を格納する配列
+unuse_server = VOICEVOX_ENGINE.dup
+
+# 変換した文の数を数えるカウンタの初期化
+conv_count = 0
+
+# 変換が必要な文の数
+total_count = input_text.length
+
+# どのスレッドに割り当てるかを決める変数
+i = 0
+
+# 最初のスレッド実行
+input_text.each{|key,value|
+
+  # まだ変換すべき文字列と割り当てるサーバ(エンジン)が残っていれば
+  if 0 < input_text.length and i < VOICEVOX_ENGINE.length then
+
+    # スレッドが処理中のキー、テキストにセット
+    thread_key[i] = key
+    thread_text[i] = value
+
+    # 未使用サーバから割り当てるサーバ(エンジン)を削除
+    unuse_server.delete(VOICEVOX_ENGINE[i])
+
+    # スレッドが使用中のサーバ(エンジン)をセット
+    thread_server[i] = VOICEVOX_ENGINE[i]
+
+    # スレッドに渡す用の一時的変数
+    server_temp = VOICEVOX_ENGINE[i]
+
+    # input_textから取り除く
+    input_text.delete(key)
+
+    # 変換した文の数をカウントする変数を増やす
+    conv_count = conv_count + 1
+
+    # 進捗表示
+    if quiet_flag == 0 then
+      STDERR.print "#{conv_count}/#{total_count} [#{key}] \"#{orig_text[key].chomp}\"\n"
+    end
+
+    # 詳細メッセージ
+    if verbous_flag == 1 then
+      STDERR.print "    => \"#{value.chomp}\"\n"
+    end
+
+    # スレッドを作成して音声変換を実行させる
+    threads[i] = Thread.new { thread_proc( server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag ) }
+
+  # 変換すべき文字列と割り当てるサーバのどちらかがなければ最初のスレッド実行は終了
+  else
+    break
+  end
+
+  # スレッド番号を増やす
+  i = i + 1
+}
+
+# スレッド実行したらループでスレッドの監視を行う
+catch :loop do
+  while true
+
+    # 1秒待つ
+    sleep 1
+
+    # スレッド状態をチェック
+    threads.each_with_index{|thr,index|
+
+      # スレッドが異常終了している場合
+      if threads[index].status.nil? then
+
+        # エラー表示して終了
+        STDERR.print "スレッドが異常終了したため終了します\n"
+        exit 1
+
+      # スレッドが正常終了している場合
+      elsif threads[index].status == false and thread_key[index] != "" then
+
+        # 音声データが返ってきたら
+        if not threads[index].value.nil? then
+
+          # どのインデックスの音声データか調べる
+          thread_key[index] =~ /^([0-9]+)\-([0-9]+)$/
+          p_num = $1.to_i
+          s_num = $2.to_i
+
+          # もし output_wavdata[文節番号] が nil であれば空の配列で初期化
+          if output_wavdata[p_num].nil? then
+            output_wavdata[p_num] = Array.new
+          end
+
+          # output_wavdata[文節番号][文章番号] に音声データを格納
+          output_wavdata[p_num][s_num] = threads[index].value
+
+          # まだ input_text に残っていたら新しいスレッドを実行する
+          if input_text.length > 0 then
+
+            # input_text に残っているデータで新しいスレッドを実行する
+            input_text.each{|key,value|
+
+              # スレッドが処理中のキー、テキストにセット
+              thread_key[index] = key
+              thread_text[index] = value
+
+              # スレッドが使用中のサーバをセット
+              server_temp = thread_server[index]
+
+              # input_textから取り除く
+              input_text.delete(key)
+
+              # 変換した文の数のカウントを増やす
+              conv_count = conv_count + 1
+
+              # 進捗表示
+              if quiet_flag == 0 then
+                STDERR.print "#{conv_count}/#{total_count} [#{key}] \"#{orig_text[key].chomp}\"\n"
+              end
+
+              # 詳細メッセージ
+              if verbous_flag == 1 then
+                STDERR.print "    => \"#{value.chomp}\"\n"
+              end
+
+              # スレッドを作成して音声変換を実行させる
+              threads[index] = Thread.new { thread_proc( server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag ) }
+
+              # each文を抜ける
+              break
+            }
+
+          # input_text が空になった場合は新しいスレッドは実行せず、実行中のスレッドの状態をチェック
+          else
+
+            # スレッドが使用中のキー、テキストをクリア
+            thread_key[index] = ""
+            thread_text[index] = ""
+            break_flag = 1
+
+            # 未使用のサーバに戻す
+            unuse_server << thread_server[index]
+
+            # 実行中のスレッドがあるかチェック
+            thread_key.each_with_index{|tkey|
+              # 実行中スレッドがあれば
+              if tkey != "" then
+                break_flag = 0
+              end
+	    }
+
+            # 実行中のスレッドがなければループを抜ける
+            if break_flag == 1 then
+              throw :loop
+            end
+          end
+
+        # 音声データ取得に失敗していたら、それ以降そのサーバは使用しない
+        else      
+
+          STDERR.print "サーバ \"#{thread_server[index]}\" は除外します\n"
+
+          # 未使用のサーバがなければキー、テキストをinput_textに戻す
+          if unuse_server.length == 0 then
+
+            # 変換した文の数のカウントを減らす
+            conv_count = conv_count - 1
+
+            # スレッドが処理していたキー、テキストをinput_textに戻す
+            input_text[ thread_key[index] ] = thread_text[index]
+
+            # スレッドが使用中のキー、テキスト、サーバをクリア
+            thread_key[index] = ""
+            thread_text[index] = ""
+            thread_server[index] = ""
+
+            # 全ての使用可能なサーバがなくなったらエラー終了
+            if thread_server.length == 0 then
+              STDERR.print "利用可能なサーバがありません"
+              exit 1
+            end
+
+          # 未使用のサーバがあればそちらのサーバでスレッドを起動する
+          else
+
+            # 未使用サーバの最初のものを割り当て
+            thread_server[index] = unuse_server[0]
+            unuse_server.delete(thread_server[index])
+
+            # スレッドが使用中のサーバをセット
+            server_temp = thread_server[index]
+
+            # 進捗表示
+            if quiet_flag == 0 then
+              STDERR.print "#{conv_count}/#{total_count} [#{thread_key[index]}] \"#{orig_text[thread_key[index]].chomp}\"\n"
+            end
+
+            # 詳細メッセージ
+            if verbous_flag == 1 then
+              STDERR.print "    => \"#{thread_text[index].chomp}\"\n"
+            end
+
+            # スレッドを作成して音声変換を実行させる
+            threads[index] = Thread.new { thread_proc( server_temp, thread_text[index], speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag ) }
+
+          end
+
+        end
+      end
+    }
+  end
+end
+
+
+# 再生するか1 つのファイルに保存する、または標準出力に出力する場合
+if play_flag == 1 or single_output_flag == 1 or stdout_flag == 1 then
+
+  # 処理途中で使用する音声データを格納する配列
+  temp_wav_list = Array.new
+
+  # 段落内の、文章毎の音声データを繋げる
+  output_wavdata.each_with_index {|wav_list, index|
+
+    # 結合して1つのwavデータにしたものをwavデータ配列に追加
+    temp_wav_list[index] = unite_wav(wav_list, interval_time)
+  }
+
+  # 段落ごとの音声データを繋げる
+  output_wav = unite_wav(temp_wav_list, paragraph_interval_time)
+
+  # 標準出力に出力する場合
+  if stdout_flag == 1 then
+
+    # デバッグメッセージ
+    debug_print("wavデータを標準出力に出力します")
+
+    # 標準出力にwavデータを出力
+    STDOUT.binmode
+    STDOUT.print output_wav
+
+  # 再生する場合
+  elsif play_flag == 1 then
+
+    # デバッグメッセージ
+    debug_print("wavデータを再生します")
+
+    # 再生
+    play_wav(output_wav, rdp_flag)
+
+  # wavで保存する場合
+  elsif mp3_flag == 0 then
+
+    # 音声データをファイルに保存
+    File.binwrite("#{outfilename}.wav", output_wav)
+
+    if quiet_flag == 0 then
+      STDERR.print "ファイル \"#{outfilename}.wav\" を保存しました\n"
+    end
+
+  # mp3に変換する場合
+  else
+
+    # 音声データをファイルに保存
+    File.binwrite("#{temp_output}.wav", output_wav)
+
+    # mp3に変換する
+    if mp3_flag == 1 then
+      retval = conv2mp3(conv_command, temp_output, outfilename)
+      if retval == 0 then
+        debug_print("#{temp_output}.wav を #{outfilename}.mp3 に変換しました")
+        if quiet_flag == 0 then
+          STDERR.print "ファイル \"#{outfilename}.mp3\" を保存しました\n"
+        end
+      else
+        debug_print("#{temp_output}.wav の #{outfilename}.mp3 変換に失敗しました")
+      end
+    end
+
+  end
+
+
+# 段落ごとに別のファイルに保存する場合
+else
+
+  # 段落内の、文章毎の音声データを繋げる
+  output_wavdata.each_with_index {|wav_list, index|
+
+    # 連番を求める
+    count = index + 1
+
+    # 結合して1つのwavデータにしたものをwavデータ配列に追加
+    wavdata = unite_wav(wav_list, interval_time)
+
+    # wavで保存する場合
+    if mp3_flag == 0 then
+
+      if output_wavdata.length > 1 then
+        # デバッグメッセージ
+        debug_print("wavデータを連番ファイル\"#{outfilename}_#{count}.wav\"に保存します")
+        # 音声データをファイルに保存
+        File.binwrite("#{outfilename}_#{count}.wav", wavdata)
+        if quiet_flag == 0 then
+          STDERR.print "ファイル \"#{outfilename}_#{count}.wav\" を保存しました\n"
+        end
+      else
+        # デバッグメッセージ
+        debug_print("wavデータをファイル\"#{outfilename}.wav\"に保存します")
+        # 音声データをファイルに保存
+        File.binwrite("#{outfilename}.wav", wavdata)
+        if quiet_flag == 0 then
+          STDERR.print "ファイル \"#{outfilename}.wav\" を保存しました\n"
+        end
+      end
+
+    # mp3で保存する場合
+    else
+
+      # デバッグメッセージ
+      debug_print("wavデータを連番ファイル\"#{temp_output}.wav\"に保存します")
+
+      # 音声データをファイルに保存
+      File.binwrite("#{temp_output}.wav", wavdata)
+
+      # mp3に変換する
+      if mp3_flag == 1 then
+        if output_wavdata.length > 1 then
+          retval = conv2mp3(conv_command, temp_output, "#{outfilename}_#{count}")
+          if retval == 0 then
+            debug_print("#{temp_output}.wav を #{outfilename}_#{count}.mp3 に変換しました")
+          else
+            debug_print("#{temp_output}.wav の #{outfilename}_#{count}.mp3 変換に失敗しました")
+          end
+          if quiet_flag == 0 then
+            STDERR.print "ファイル \"#{outfilename}_#{count}.mp3\" を保存しました\n"
+          end
+        else
+          retval = conv2mp3(conv_command, temp_output, "#{outfilename}")
+          if retval == 0 then
+            debug_print("#{temp_output}.wav を #{outfilename}.mp3 に変換しました")
+          else
+            debug_print("#{temp_output}.wav の #{outfilename}.mp3 変換に失敗しました")
+          end
+          if quiet_flag == 0 then
+            STDERR.print "ファイル \"#{outfilename}.mp3\" を保存しました\n"
+          end
+        end
+      end
+
+    end
+
+  }
+
+end
+
+# デバッグメッセージ
+debug_print("処理を完了しました")
+exit 0
+

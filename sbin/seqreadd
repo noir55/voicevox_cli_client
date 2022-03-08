@@ -16,7 +16,7 @@ case $1 in
     ps aux | grep seqread.rb | grep -v grep
     ;;
   *)
-    echo "Usage: $0 start|stop"
+    echo "Usage: $0 start|stop|status"
     ;;
 esac
 

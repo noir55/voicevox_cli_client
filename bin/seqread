@@ -63,10 +63,14 @@ else
   write_data = JSON.generate(temp_data)
 end
 
-# ソケットにJSON形式のデータを書き込む
-Socket.open(:UNIX, :DGRAM) do |sock|
-  addr = Socket.sockaddr_un(SOCKFILE)
-  sock.send(write_data, 0, addr)
+begin
+  # ソケットにJSON形式のデータを書き込む
+  Socket.open(:UNIX, :DGRAM) do |sock|
+    addr = Socket.sockaddr_un(SOCKFILE)
+    sock.send(write_data, 0, addr)
+  end
+rescue => e
+  STDERR.print "ソケット書き込み時にエラーが発生しました (e=\"#{e.message}\")\n"
 end
 
 exit

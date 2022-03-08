@@ -17,8 +17,13 @@ SOCKFILE = "#{__dir__}/../var/run/seqread.sock"
 # vvttsコマンドのパス
 VVTTSCMD = "#{__dir__}/../bin/vvtts"
 
-# 音声再生コマンド
-PLAYCMD = 'aplay -D sysdefault'
+# 設定ファイルを読み込む
+if File.exist?("#{__dir__}/../etc/config.rb")
+  require_relative '../etc/config.rb'
+else
+  STDOUT.print "設定ファイル \"#{__dir__}/../etc/config.rb\" が見つかりません"
+  exit 1
+end
 
 
 #----------
@@ -31,7 +36,6 @@ def debug_print(message)
     STDERR.print "Debug: #{message}\n"
   end
 end
-
 
 # 文字列を音声に変換するスレッドで実行される処理
 def make_wavdata(jsondata)
@@ -54,11 +58,21 @@ def make_wavdata(jsondata)
 end
 
 
-# 音声データを再生するスレッドで実行される関数
+# 音声データを再生するスレッドで実行される処理
 def play_wav(wavdata)
   begin
+    # aplayコマンドで再生する場合
+    if PLAY_CMD == "aplay" then
+      play_cmd = "aplay -D #{APLAY_DEVICE}"
+    # sox(play)コマンドで再生する場合
+    elsif PLAY_CMD == "sox" then
+      # 環境変数「AUDIODEV」で再生するデバイスを指定
+      ENV['AUDIODEV'] = SOX_DEVICE
+      # 再生コマンド
+      play_cmd = "play -"
+    end
     # 再生コマンドにパイプで音声データを渡して実行
-    o, e, s = Open3.capture3(PLAYCMD, :stdin_data=>wavdata)
+    Open3.capture3(play_cmd, :stdin_data=>wavdata)
   rescue => e
     # エラーが発生したら nil を返す
     STDERR.print "音声再生スレッドでエラーが発生しました (e=\"#{e.message}\")\n"

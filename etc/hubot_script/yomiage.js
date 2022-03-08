@@ -12,7 +12,7 @@ module.exports = (robot) => {
     }
     json = JSON.stringify(obj);
     //require('child_process').exec( "echo \'" + json + "\' >>/tmp/chat.txt" );
-    require('child_process').exec( "echo '" + json + "' | /opt/vvtts/bin/seqread" );
+    require('child_process').exec( "echo '" + json + "' | /opt/voicevox_cli_client/bin/seqread" );
   })
 }
 

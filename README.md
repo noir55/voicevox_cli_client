@@ -1,5 +1,5 @@
 
-# voicevox cli client
+# VOICEVOX CLI Client
 
 [VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine)用のコマンドラインツールです。
 
@@ -21,21 +21,14 @@ VOICEVOX ENGINEのユーザ辞書に対し、単語の追加、編集、削除�
 
 Rocky Linuxで、ruby 2.5.9を使用して作成・動作チェックしていますが、Linuxでrubyが実行できる環境であればおそらく動くと思います。
 
-VOICEVOX ENGINEは別途用意して起動してください。(バージョン 0.11.3 で動作チェックしています)
+VOICEVOX ENGINEは別途用意して起動してください。(VOICEVOX ENGINE 0.11.3 で動作チェックしています)
 
 
 # インストール、使用準備
 
-ファイル一式を`/opt/vvtts`以下に設置してください。
+ファイル一式を任意の場所に設置してください。
 
-コマンドにパスを通したい場合、以下のように実行してください。
-
-```bash
-$ ln -s /opt/vvtts/etc/profile.d/vvtts.sh /etc/profile.d/
-$ ln -s /opt/vvtts/etc/profile.d/vvtts.csh /etc/profile.d/
-```
-
-`/opt/vvtts/etc/config.rb`が設定ファイルです。ファイルを編集し、
+`etc/config.rb`が設定ファイルです。ファイルを編集し、
 ```
 VOICEVOX_ENGINE = [ "192.168.0.11:50021" ]
 ```
@@ -53,7 +46,7 @@ $ vvtts --check
 ```
 コマンドで、設定したVOICEVOX ENGINEが動作しているかどうか確認できます。
 
-アンインストールする場合は、設置・作成したファイルを全て削除してください。
+アンインストールする場合は、設置したファイルを全て削除してください。
 
 # 使い方
 
@@ -87,6 +80,9 @@ $ vvtts --help
 $ vvtts -p -s 8 "読み上げたいテキストをここに入力してください"
 ```
 
+設定ファイルで`aplay`コマンドが使用する別のデバイスを指定することも可能です。一般ユーザで再生する場合は、ユーザが`audio`グループに所属している必要があります。
+
+
 ## テキスト内で音声種別や速度などを変更する
 
 以下のように特定の書式を文章の先頭に記述して、
@@ -95,7 +91,7 @@ $ vvtts -p -s 8 "読み上げたいテキストをここに入力してくださ
 #{s10,S1.5}こんにちは
 ```
 変換を実行することで音声種別などのパラメータを途中から変更することができます。
-```
+```nbash
 $ vvtts -f text.txt
 ```
 
@@ -116,12 +112,12 @@ $ vvtts -f text.txt
 
 ## 置換リスト
 
-`/opt/vvtts/etc/replace.list`が置換リストです。このリストに基づいて入力文字列の置換処理が行われます。
+`etc/replace.list`が置換リストです。このリストに基づいて入力文字列の置換処理が行われます。
 
 置換リストは、1行に1項目、置換前の文字列と置換後の文字列をタブ区切りで記述してください。`#`で始まる行はコメント行として 無視され ます。
 
 置換前の文字列は正規表現で記述することができます。
-```replace.list
+```
 さようなら      ごきげんよう
 私|わたし       わたくし
 [Pp]ython       パイソン
@@ -135,37 +131,37 @@ $ vvtts -f text.txt
 `vvdict`コマンドで、VOICEVOX ENGINEに読み方&アクセント辞書を登録できます。
 
 単語追加 - `単語` `読み方(カタカナ)` `アクセント核位置`を順に指定してください
-```
+```nbash
 $ vvdict add ruby ルビー 1
 ```
 
 単語修正 - `単語` `読み方(カタカナ)` `アクセント核位置`を順に指定してください
-```
+```bash
 $ vvdict mod ruby ルビー 0
 ```
 
 単語削除 - `単語`を指定してください
-```
+```bash
 $ vvdict del ruby
 ```
 
 単語をすべて削除
-```
+```bash
 $ vvdict deleteall
 ```
 
 登録済みの単語表示 (この出力をリダイレクトでファイル保存すれば、一括登録リストとして使えます)
-```
+```bash
 $ vvdict show
 ```
 
 単語を一括登録リストからまとめて登録 (一括登録リストは`単語` `読み方(カタカナ)` `アクセント核位置`をタブ区切りで1行に1単語づつ記 述)
-```
+```bash
 $ vvdict listadd list.txt
 ```
 
 単語をすべて削除したうえで、一括登録リストからまとめて登録
-```
+```bash
 $ vvdict rereg list.txt
 ```
 
@@ -176,25 +172,20 @@ $ vvdict rereg list.txt
 
 起動
 ```bash
-$ /opt/vvtts/sbin/seqreadd start
+$ sbin/seqreadd start
 ```
 
-起動すると`seqread.rb`が実行されます。`seqread.rb`実行中は`seqread`コマンドで読み上げ文字列の登録ができます。(`/opt/vvtts/var/run/seqread.sock`に対する書き込み権限が必要なことに注意ください)
+起動すると`seqread.rb`が実行されます。`seqread.rb`実行中は`seqread`コマンドで読み上げ文字列の登録ができます。(`/opt/voicevox_cli_client/var/run/seqread.sock`に対する書き込み権限が必要なことに注意ください)
 
 読み上げ文字列は、コマンドオプションとして指定するか、パイプで渡します。
-```
+```bash
 $ seqread "読み上げたいメッセージ"
 $ cat text.txt | seqread
 ```
 
-登録された文字列は、`vvtts`コマンドを用いて登録された順に音声変換後再生されます。再生中にも並行して音声変換が実行されるようになっています。。
+登録された文字列は、`vvtts`コマンドを用いて登録された順に音声変換後再生されます。再生中にも並行して音声変換が実行されるようになっています。
 
 チャットボットで使用される[Hubot](https://hubot.github.com/)で`seqread`コマンドを呼び出すためのサンプルスクリプトが`/opt/vvtts/etc/hubot_script/yomiage.js`にあります。
-
-
-# 備考
-
-Rubyにあまり詳しくないため、Webの情報をかなり参考にして作成しています。このため、ソースコードが汚かったり、同じような処理なのに書き方が異なっていたりと、お見苦しい点が多々あると思いますがご容赦ください。
 
 
 # ライセンス

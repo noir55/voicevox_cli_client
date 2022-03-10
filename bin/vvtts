@@ -19,7 +19,7 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.1.8"
+VERSION="1.1.9"
 
 
 #------
@@ -249,12 +249,12 @@ def play_wav(wavdata, rdp_flag)
       play_cmd = "aplay -D pulse"
     # オプションで「--no-rdp」が指定されている場合
     elsif rdp_flag == 2 then
-      play_cmd = "aplay -D #{APLAY_DEVICE}"
+      play_cmd = "aplay -D #{APLAY_VVTTS_DEVICE}"
     # オプションで指定されていない場合は自動判別
     else
       # XRDP上のターミナルでない場合
       if ENV['XRDP_PULSE_SINK_SOCKET'].nil? or ENV['XRDP_PULSE_SINK_SOCKET'].empty? then
-        play_cmd = "aplay -D #{APLAY_DEVICE}"
+        play_cmd = "aplay -D #{APLAY_VVTTS_DEVICE}"
       # XRDP上のターミナルの場合
       else
         play_cmd = "aplay -D pulse"
@@ -267,12 +267,12 @@ def play_wav(wavdata, rdp_flag)
     # オプションで「--no-rdp」が指定されている場合
     if rdp_flag == 2 then
       # 環境変数「AUDIODEV」で再生するデバイスを指定
-      ENV['AUDIODEV'] = SOX_DEVICE
+      ENV['AUDIODEV'] = SOX_VVTTS_DEVICE
     # オプションで指定されていない場合は自動判別
     elsif rdp_flag == 0 then
       # XRDP上のターミナルでない場合
       if ENV['XRDP_PULSE_SINK_SOCKET'].nil? or ENV['XRDP_PULSE_SINK_SOCKET'].empty? then
-        ENV['AUDIODEV'] = SOX_DEVICE
+        ENV['AUDIODEV'] = SOX_VVTTS_DEVICE
       end
     end
 

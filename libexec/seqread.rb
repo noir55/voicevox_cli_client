@@ -63,11 +63,11 @@ def play_wav(wavdata)
   begin
     # aplayコマンドで再生する場合
     if PLAY_CMD == "aplay" then
-      play_cmd = "aplay -D #{APLAY_DEVICE}"
+      play_cmd = "aplay -D #{APLAY_SEQREAD_DEVICE}"
     # sox(play)コマンドで再生する場合
     elsif PLAY_CMD == "sox" then
       # 環境変数「AUDIODEV」で再生するデバイスを指定
-      ENV['AUDIODEV'] = SOX_DEVICE
+      ENV['AUDIODEV'] = SOX_SEQREAD_DEVICE
       # 再生コマンド
       play_cmd = "play -"
     end

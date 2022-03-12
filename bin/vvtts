@@ -19,7 +19,7 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.1.9"
+VERSION="1.1.10"
 
 
 #------
@@ -51,7 +51,7 @@ end
 def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
 
   # URLエンコード
-  enc_text = URI.encode(text)
+  enc_text = CGI.escape(text)
   # デバッグメッセージ
   debug_print("enc_text=#{enc_text}")
 
@@ -130,7 +130,7 @@ end
 def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
 
   # URLエンコード
-  enc_text = URI.encode(text)
+  enc_text = CGI.escape(text)
   # デバッグメッセージ
   debug_print("enc_text=#{enc_text}")
 
@@ -1296,9 +1296,17 @@ catch :loop do
             thread_text[index] = ""
             thread_server[index] = ""
 
+            # 使用可能なサーバがあるかチェック
+            available_server_flag = 0
+            thread_server.each {|thvalue|
+              if thvalue != "" then
+                available_server_flag = 1
+              end
+            }
+
             # 全ての使用可能なサーバがなくなったらエラー終了
-            if thread_server.length == 0 then
-              STDERR.print "利用可能なサーバがありません"
+            if available_server_flag == 0 then
+              STDERR.print "利用可能なサーバがありません\n"
               exit 1
             end
 

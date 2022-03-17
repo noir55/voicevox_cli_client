@@ -19,12 +19,17 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.1.10"
+VERSION="1.2.0"
 
 
 #------
 # 設定
 #------
+
+# cmudict.rbを読み込む
+if File.exist?("#{__dir__}/../lib/cmudict.rb") and File.exist?("#{__dir__}/../lib/cmudict.dict") then
+  require_relative '../lib/cmudict.rb'
+end
 
 # 設定ファイルを読み込む
 if File.exist?("#{__dir__}/../etc/config.rb")
@@ -33,6 +38,9 @@ else
   STDOUT.print "設定ファイル \"#{__dir__}/../etc/config.rb\" が見つかりません"
   exit 1
 end
+
+# 指定できるSpeakerIDの最大値
+MAX_SPEAKER_ID = 19
 
 
 #----------
@@ -49,6 +57,16 @@ end
 
 # 文字列をwavデータに変換する関数
 def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
+
+  # speakerの値チェック
+  if speaker.to_i < 0 or MAX_SPEAKER_ID < speaker.to_i then
+    STDERR.print "speaker の値が正しくありません (\"#{speaker}\")\n"
+  end
+
+  # query_speakerの値チェック
+  if query_speaker != "" and ( query_speaker.to_i < 0 or MAX_SPEAKER_ID < query_speaker.to_i ) then
+    STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
+  end
 
   # URLエンコード
   enc_text = CGI.escape(text)
@@ -70,12 +88,21 @@ def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, par
   # JSONの取得
   res = Net::HTTP.post_form(uri, 'body' => nil)
   # デバッグメッセージ
-  #debug_print("res=#{res.body}")
+  debug_print("res=#{res.body}")
 
   # JSON取得に成功したら、音声データ変換を実行
   if res.code == "200" then
 
-    # 音声補正
+    # 話速補正
+    param_speed = sprintf("%0.2f", param_speed.to_f * SPEED_CORRECT[speaker.to_i] )
+
+    # ピッチ補正
+    param_pitch = sprintf("%0.2f", param_pitch.to_f + PITCH_CORRECT[speaker.to_i] )
+
+    # イントネーション補正
+    param_intonation = sprintf("%0.2f", param_intonation.to_f * INTONATION_CORRECT[speaker.to_i] )
+
+    # 音量補正
     param_volume = sprintf("%0.2f", param_volume.to_f * VOLUME_CORRECT[speaker.to_i] )
 
     # 各種パラメータがデフォルト値でない場合、値をセットする
@@ -129,6 +156,21 @@ end
 # 文字列を2者の音声をモーフィングしたwavデータに変換する関数
 def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
 
+  # base_speakerの値チェック
+  if base_speaker.to_i < 0 or MAX_SPEAKER_ID < base_speaker.to_i then
+    STDERR.print "base_speaker の値が正しくありません (\"#{base_speaker}\")\n"
+  end
+
+  # target_speakerの値チェック
+  if target_speaker.to_i < 0 or MAX_SPEAKER_ID < target_speaker.to_i then
+    STDERR.print "target_speaker の値が正しくありません (\"#{target_speaker}\")\n"
+  end
+
+  # query_speakerの値チェック
+  if query_speaker != "" and ( query_speaker.to_i < 0 or MAX_SPEAKER_ID < query_speaker.to_i ) then
+    STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
+  end
+
   # URLエンコード
   enc_text = CGI.escape(text)
   # デバッグメッセージ
@@ -153,6 +195,15 @@ def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query
 
   # JSON取得に成功したら、音声データ変換を実行
   if res.code == "200" then
+
+    # 話速補正
+    param_speed = sprintf("%0.2f", param_speed.to_f * ( (SPEED_CORRECT[base_speaker.to_i] * (1.0 - morph_rate.to_f)) + (SPEED_CORRECT[target_speaker.to_i] * morph_rate.to_f) ) )
+
+    # ピッチ補正
+    param_pitch = sprintf("%0.2f", param_pitch.to_f + ( (PITCH_CORRECT[base_speaker.to_i] * (1.0 - morph_rate.to_f)) + (PITCH_CORRECT[target_speaker.to_i] * morph_rate.to_f) ) )
+
+    # イントネーション補正
+    param_intonation = sprintf("%0.2f", param_intonation.to_f * ( (INTONATION_CORRECT[base_speaker.to_i] * (1.0 - morph_rate.to_f)) + (INTONATION_CORRECT[target_speaker.to_i] * morph_rate.to_f) ) )
 
     # 音声補正
     param_volume = sprintf("%0.2f", param_volume.to_f * ( (VOLUME_CORRECT[base_speaker.to_i] * (1.0 - morph_rate.to_f)) + (VOLUME_CORRECT[target_speaker.to_i] * morph_rate.to_f) ) )
@@ -595,6 +646,9 @@ verbous_flag = 0
 # サーバのチェックを行うフラグ
 check_flag = 0
 
+# CMU 発音辞書を使用するフラグ
+cmudict_flag = 0
+
 # 引数で出力ファイル名が指定された場合にファイル名を格納する変数
 output_filename = ""
 
@@ -607,9 +661,9 @@ opt.on('-f', '--file TEXT_FILE', 'テキストファイルの内容を音声変�
 opt.on('-o', '--output FILENAME_PREFIX', '出力ファイル名を指定します (拡張子は不要)') {|v| output_filename = v }
 opt.on('-1', '--single', 'テキスト全体を1つのファイルに出力します') {|v| single_output_flag = 1 }
 opt.on('-p', '--play', 'ファイルに出力せず、全ての音声変換後に読み上げを行います') {|v| play_flag = 1 }
-opt.on('-s', '--speaker NUMBER', '声の種類を指定します (0-14)') {|v| speaker = v }
-opt.on('-m', '--morph_speaker NUMBER,RATE', 'モーフィング先の声の種類 (0-14) と、モーフィング率 (0.1-0.9) を指定します') {|v| morph_speaker,morph_rate=v.split(",") }
-opt.on('--query NUMBER', 'クエリ時の声の種類を指定します (0-14)') {|v| query_speaker = v }
+opt.on('-s', '--speaker NUMBER', "声の種類を指定します (0-#{MAX_SPEAKER_ID})") {|v| speaker = v }
+opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (0-#{MAX_SPEAKER_ID}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
+opt.on('--query NUMBER', "クエリ時の声の種類を指定します (0-#{MAX_SPEAKER_ID})") {|v| query_speaker = v }
 opt.on('-i', '--interval INTERVAL_SECOND', '文章間の時間を指定します (秒)'){|v| interval_time = v.to_f }
 opt.on('-I', '--paragraph-interval INTERVAL_SECOND', '文節間の時間を指定します (秒)'){|v| paragraph_interval_time = v.to_f }
 opt.on('-q', '--quiet', '標準出力に何も表示しません') {|v| quiet_flag = 1 }
@@ -623,6 +677,7 @@ opt.on('--speed SPEED_SCALE', 'スピードスケールを指定します (defau
 opt.on('--pitch PITCH_SCALE', 'ピッチスケールを指定します (default=0.0)'){|v| param_pitch = v.to_f }
 opt.on('--intonation INTONATION_SCALE', 'イントネーションスケールを指定します (default=1.0)'){|v| param_intonation = v.to_f }
 opt.on('--volume VOLUME_SCALE', 'ボリュームスケールを指定します (default=1.0)'){|v| param_volume = v.to_f }
+opt.on('--cmudict', 'CMU Pronouncing Dictionaryを使用して英語をカナ読みする'){|v| cmudict_flag = 1 }
 opt.on('--debug', 'デバッグメッセージを出力します') {|v| @debug_flag = 1 }
 opt.on('--check', 'エンジンの状態をチェックします') {|v| check_flag = 1 }
 opt.on('--version', 'バージョンを出力します') {|v| print "#{VERSION}\n" ; exit }
@@ -661,16 +716,22 @@ end
 
 # speaker の値チェック
 debug_print("speaker=#{speaker}")
-if not speaker =~ /^([0-9]|1[0-4])$/ then
-  STDERR.print "\"-s (--speaker)\" の値は、0～14 のいずれかを指定してください\n"
+if not speaker =~ /^[0-9]+$/ then
+  STDERR.print "\"-s (--speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかを整数で指定してください\n"
+  exit 1
+elsif speaker.to_i < 0 or MAX_SPEAKER_ID < speaker.to_i then
+  STDERR.print "\"-s (--speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかを整数で指定してください\n"
   exit 1
 end
 
 # query_speaker の値チェック
 if query_speaker != "" then
   debug_print("query_speaker=#{query_speaker}")
-  if not query_speaker =~ /^([0-9]|1[0-4])$/ then
-    STDERR.print "\"--query\" の値は、0～14 のいずれかを指定してください\n"
+  if not query_speaker =~ /^[0-9]+$/ then
+    STDERR.print "\"--query\" の値は、0～#{MAX_SPEAKER_ID} のいずれかを整数で指定してください\n"
+    exit 1
+  elsif query_speaker.to_i < 0 or MAX_SPEAKER_ID < query_speaker.to_i then
+    STDERR.print "\"--query\" の値は、0～#{MAX_SPEAKER_ID} のいずれかを整数で指定してください\n"
     exit 1
   end
 end
@@ -678,12 +739,12 @@ end
 # morph_speaker の値チェック
 debug_print("morph_speaker=#{morph_speaker}, morph_rate=#{morph_rate}")
 if morph_speaker != "" or morph_rate != "" then
-  if (not morph_speaker =~ /^([0-9]|1[0-4])$/) or (not morph_rate =~ /^[01]\.[0-9]$/) then
-    STDERR.print "\"-m (--morph_speaker)\" の値は、0～14 のいずれかと、0.0～1.0 のいずれかの値を「,(カンマ)」でつないだ値にしてください\n"
+  if (not morph_speaker =~ /^[0-9]+$/) or (not morph_rate =~ /^[0-9]\.[0-9]$/) then
+    STDERR.print "\"-m (--morph_speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかの整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
     exit 1
   end
-  if morph_rate.to_f > 1.0 then
-    STDERR.print "\"-m (--morph_speaker)\" の値は、0～14 のいずれかと、0.0～1.0 の間の値を「,(カンマ)」でつないだ値にしてください\n"
+  if morph_rate.to_f < 0.0 or 1.0 < morph_rate.to_f or morph_speaker.to_i < 0 or MAX_SPEAKER_ID < morph_speaker.to_i then
+    STDERR.print "\"-m (--morph_speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかの整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
     exit 1
   end
 end
@@ -856,8 +917,8 @@ input.each_line {|line|
     next
   end
 
-  # 空行が出てきたら
-  if line =~ /^$/ then
+  # 空行(スペースやタブのみの行も空行とみなす)が出てきたら
+  if line =~ /^[ 　\t]*$/ then
 
     # temp_textが空でなければ、配列に入れる
     if temp_text != "" then
@@ -888,6 +949,11 @@ input_text = Hash.new
 
 # オリジナルのテキストを格納するハッシュを初期化
 orig_text = Hash.new
+
+# CMU 発音辞書を使用したカナ変換を実行する場合
+if cmudict_flag == 1 then
+  cmudict = CMUDICT.new
+end
 
 # インデックスを初期化
 i = 0
@@ -931,7 +997,7 @@ conv_text.each{|text|
         # もし、「sr」「sR」だったら声の種類をランダムに設定
         elsif temp =~ /^ *s[rR] *$/ then
           # 配列からランダムに1つの値を取り出す
-          speaker = [0,1,2,3,4,5,6,7,8,8,8,8,9,9,9,9,10,10,10,10,11,11,11,11,12,12,12,12,13,13,13,13,14,14,14,14].sample
+          speaker = [0,1,2,3,4,5,6,7,8,8,8,8,9,9,9,9,10,10,10,10,11,11,11,11,12,12,12,12,13,13,13,13,14,14,14,14,15,16,17,18,19].sample
         # もし、「q<数字>」だったら、クエリの声の種類を変更
         elsif temp =~ /^ *q([0-9]+) *$/ then
           query_speaker = $1.to_i
@@ -1034,8 +1100,8 @@ conv_text.each{|text|
     # 置換リストを読み込む
     repl_hash = load_replace_list()
 
-      # 文字列の置換処理を実施
-      input_text.each {|ikey,ivalue|
+    # 文字列の置換処理を実施
+    input_text.each {|ikey,ivalue|
 
       # 置換リストにある言葉を置き換え
       repl_hash.each{|key,value|
@@ -1043,24 +1109,24 @@ conv_text.each{|text|
         if input_text[ikey] =~ /#{key}/ then
           # マッチング文字列に「()」記述があり、$1、$2などの変数があればmatch_str配列に格納する
           match_str = Array.new
-          i = 1
+          k = 1
           while true do
             # $<数字> 変数があれば、配列に追加
-            eval("match_str[i] = $#{i} if (not $#{i}.nil?)")
-            debug_print("match_str[#{i}] = #{match_str[i]}")
-            if match_str[i].nil? then
+            eval("match_str[k] = $#{k} if (not $#{k}.nil?)")
+            debug_print("match_str[#{k}] = #{match_str[k]}")
+            if match_str[k].nil? then
               break
             end
-            i += 1
+            k += 1
           end
           # 置換リストの置換後の値に${<数字>}があれば、match_str内の文字列に置き換え
-          i = 1
+          k = 1
           while true do
-            if match_str[i].nil? then
+            if match_str[k].nil? then
               break
             end
-            value.gsub!(/\$\{#{i}\}/, match_str[i])
-            i += 1
+            value.gsub!(/\$\{#{k}\}/, match_str[k])
+            k += 1
           end
           debug_print("置換後文字列=#{value}")
         end
@@ -1100,6 +1166,26 @@ conv_text.each{|text|
         input_text[ikey].gsub!( /([0-9]),([0-9][0-9][0-9])/, "\\1\\2")
       end
 
+    }
+  end
+
+  # CMU 発音辞書を使用したカナ変換を実行する場合
+  if cmudict_flag == 1 then
+    # 文字列の置換処理を実施
+    input_text.each {|ikey,ivalue|
+      # 先頭に#{s4}のような記述があったら分ける
+      if input_text[ikey] =~ /^(#\{[a-zA-Z0-9,\.]+?\})(.*)$/ then
+        head = $1
+        body = $2
+      else
+        head = ""
+        body = $2
+      end
+      # 本文に含まれる4文字以上の英単語を置換する
+      body2 = body.gsub(/([a-zA-Z'\.\-][a-zA-Z'\.\-][a-zA-Z'\.\-][a-zA-Z'\.\-]+)/){|mword| 
+         temp2 = cmudict.word2kana(mword).strip
+      }
+      input_text[ikey] = head + body2
     }
   end
 

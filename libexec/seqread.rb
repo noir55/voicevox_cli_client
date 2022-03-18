@@ -25,6 +25,9 @@ else
   exit 1
 end
 
+# ../var/run ディレクトリがなければ作成
+FileUtils.mkdir_p("#{__dir__}/../var/run") unless FileTest.exist?("#{__dir__}/../var/run")
+
 
 #----------
 # 関数定義

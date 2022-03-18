@@ -5,6 +5,7 @@ cd $(dirname $0)
 case $1 in
   start)
     ../libexec/seqread.rb &
+    mkdir -p ../var/run
     echo $! > ../var/run/seqread.pid
     ;;
   stop)

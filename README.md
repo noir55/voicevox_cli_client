@@ -21,7 +21,7 @@ VOICEVOX ENGINEのユーザ辞書に対し、単語の追加、編集、削除�
 
 Rocky Linux 8.5で、Ruby 2.5.9を使用して作成・動作チェックしていますが、LinuxでRubyが実行できる環境であれば動くと思います。
 
-VOICEVOX ENGINEは別途用意して起動してください。(バージョン 0.11.3 で動作チェックしています)
+VOICEVOX ENGINEは別途用意して起動してください。(バージョン 0.11.4 で動作チェックしています)
 
 
 # インストール、使用準備
@@ -168,6 +168,10 @@ $ vvdict listadd list.txt
 ```
 $ vvdict rereg list.txt
 ```
+
+## CMU Pronoucing Dictionary を使用した英語のカナ読み上げ
+
+`--cmudict` オプションを付けることで [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict) (Copyright (C) 1993-2015 Carnegie Mellon University. All rights reserved.) を使用した英語のカタカナ変換を行うことができます。本機能は [english_to_kana](https://github.com/morikatron/snippet/tree/master/english_to_kana) のサンプルコードを基にRubyで再実装したうえで少し改良しています。短めの英単語はVOICEVOXの方が自然に読み上げてくれることが多い印象のため、4文字以上の英単語について本機能が適用されます。
 
 
 # その他

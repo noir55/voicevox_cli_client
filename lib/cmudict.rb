@@ -173,8 +173,8 @@ class CMUDICT
         } #each_line
       } #open
 
-      # 書き込み権限があればcmudict.cacheに書き込み
-      if  File.writable?("#{__dir__}/cmudict.cache") then
+      # ディレクトリに書き込み権限があればcmudict.cacheに書き込み
+      if  File.writable?("#{__dir__}") then
         File.open("#{__dir__}/cmudict.cache", "w"){|f|
           JSON.dump(@eng_kana_dic,f)
         }
@@ -195,3 +195,5 @@ class CMUDICT
   end
 
 end #class
+
+CMUDICT.new

@@ -19,17 +19,12 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.2.0"
+VERSION="1.2.1"
 
 
 #------
 # 設定
 #------
-
-# cmudict.rbを読み込む
-if File.exist?("#{__dir__}/../lib/cmudict.rb") and File.exist?("#{__dir__}/../lib/cmudict.dict") then
-  require_relative '../lib/cmudict.rb'
-end
 
 # 設定ファイルを読み込む
 if File.exist?("#{__dir__}/../etc/config.rb")
@@ -952,6 +947,13 @@ orig_text = Hash.new
 
 # CMU 発音辞書を使用したカナ変換を実行する場合
 if cmudict_flag == 1 then
+  # cmudict.rbを読み込む
+  if File.exist?("#{__dir__}/../lib/cmudict.rb") and File.exist?("#{__dir__}/../lib/cmudict.dict") then
+    require_relative '../lib/cmudict.rb'
+  else
+    STDERR.print "\"cmudict.rb\" または \"cmudict.dict\" ファイルが見つかりません\n"
+    exit 1
+  end
   cmudict = CMUDICT.new
 end
 
@@ -1146,6 +1148,8 @@ conv_text.each{|text|
       input_text[ikey] = input_text[ikey].tr('０-９ａ-ｚＡ-Ｚ','0-9a-zA-Z')
       # 文中の全角記号を半角記号に変換
       input_text[ikey] = input_text[ikey].tr('　！-～',' !-~')
+      # 全角「’」を半角「'」に変換(cmu辞書変換で半角「'」が使われるため)
+      input_text[ikey] = input_text[ikey].tr('’', '\'')
 
       # 文中の全角文字と半角英数字間の半角スペースを削除
       if input_text[ikey] =~ /[^\x01-\x7E] +[A-Za-z0-9]+/ then

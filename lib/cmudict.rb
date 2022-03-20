@@ -98,7 +98,7 @@ class CMUDICT
           #print "word=#{word} p=#{p}\n"
           yomi = ""
           #word, p = line.split("\t")
-          if word =~ /^[a-zA-Z'\.\-]+$/ then
+          if word =~ /^[0-9a-zA-Z'_\.\-]+$/ then
             # 単語は全て小文字に変換
             word = word.downcase
             # 発音記号は配列に入れる
@@ -132,8 +132,12 @@ class CMUDICT
                   yomi += ENG2KANA[s]['']
                 end
               elsif VOWELS.key?(s) then
-                if ['AA','AH'].include?(s) then
-                  v = find_vowel(word, index-1, sound_list.length-2)
+                # 先頭が「AA」で綴りの最初が「au」の場合、母音を「o」にする
+                if ['BOS'].include?(s_prev) and ['AA'].include?(s) and word[0..1] == "au" then
+                  v = 'o'
+                #「AA」「AH」の場合は母音を調べる
+                elsif ['AA','AH'].include?(s) then
+                  v = find_vowel(word, index-1, sound_list.length-3)
                 else
                   v = VOWELS[s]
                 end
@@ -158,6 +162,8 @@ class CMUDICT
                      ['AH'].include?(s) and
                      ['N'].include?(s_next) then
                     yomi += "ョ"
+                    #「ョ」が連続したら削除
+                    yomi.sub!('ョョ','ョ')
                   end
                 else
                   if ['AY','EY','OY'].include?(s_prev) and not ['AA','AH'].include?(s) then
@@ -174,11 +180,21 @@ class CMUDICT
                   yomi += 'イ'
                 end
                 if not VOWELS.key?(s_next) then
-                  if ['ER','IY','OW','UW'].include?(s) then
+                  # 「OW」は最後にないときは伸ばす
+                  if ['OW'].include?(s) and (not ['EOS'].include?(s_next)) then
+                    yomi += 'ー'
+                  elsif ['ER','IY','UW'].include?(s) then
                     yomi += 'ー'
                   elsif ['AW'].include?(s) then
                     yomi += 'ウ'
                   end
+                end
+                # 先頭に「AA D」「AO D」の場合「ー」を追加する
+                if ['BOS'].include?(s_prev) and
+                   ['AA', 'AO'].include?(s) and
+                   ['D'].include?(s_next) and
+                   word[0..1] == "au" then
+                  yomi += "ー"
                 end
               end
             }

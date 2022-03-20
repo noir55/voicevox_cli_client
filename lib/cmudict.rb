@@ -192,7 +192,7 @@ class CMUDICT
                 # 先頭に「AA D」「AO D」の場合「ー」を追加する
                 if ['BOS'].include?(s_prev) and
                    ['AA', 'AO'].include?(s) and
-                   ['D'].include?(s_next) and
+                   ['D','S'].include?(s_next) and
                    word[0..1] == "au" then
                   yomi += "ー"
                 end

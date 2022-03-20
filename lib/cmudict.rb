@@ -139,12 +139,27 @@ class CMUDICT
                 end
                 if ENG2KANA.key?(s_prev) then
                   yomi += ENG2KANA[s_prev][v]
-                  # 追加
-                  if ['B','D','F','G','K','L','P','R','T','V','HH','JH'].include?(s_prev) and ['AA','AE','AH','IH','UH','EH','OH','AO'].include?(s) and ['D','G','K','P','T','CH','SH'].include?(s_next) and s_next2 == 'EOS' then
+                  # 「ッ」を追加するルール1
+                  if ['B','D','F','G','K','L','P','R','T','V','HH','JH'].include?(s_prev) and
+                     ['AA','AE','AH','IH','UH','EH','OH','AO'].include?(s) and
+                     ['D','G','K','P','T','CH','SH'].include?(s_next) and
+                     ['EOS'].include?(s_next2) then
                     yomi  += "ッ"
                   end
-                  # 追加ここまで
-                  else
+                  # 「ッ」を追加するルール2
+                  if ['K'].include?(s_prev) and
+                     ['AH'].include?(s) and
+                     ['SH'].include?(s_next) and
+                     ['AH'].include?(s_next2) then
+                    yomi  += "ッ"
+                  # 「ョ」を追加するルール
+                  end
+                  if ['SH','ZH'].include?(s_prev) and
+                     ['AH'].include?(s) and
+                     ['N'].include?(s_next) then
+                    yomi += "ョ"
+                  end
+                else
                   if ['AY','EY','OY'].include?(s_prev) and not ['AA','AH'].include?(s) then
                     yomi += {'a' => 'ヤ', 'i' => 'イ', 'u' => 'ユ', 'e' => 'エ', 'o' => 'ヨ'}[v]
                   elsif ['AW','UW'].include?(s_prev) then

@@ -128,6 +128,9 @@ class CMUDICT
                   yomi += ENG2KANA[s][''][0]
                 elsif ['EH','EY','IH','IY'].include?(s_prev) and s == 'R' then
                   yomi += 'アー'
+                # 「M P」「M B」の場合
+                elsif ['M'].include?(s) and ['B','P'].include?(s_next) then
+                  yomi += "ン"
                 else
                   yomi += ENG2KANA[s]['']
                 end
@@ -142,6 +145,19 @@ class CMUDICT
                   v = VOWELS[s]
                 end
                 if ENG2KANA.key?(s_prev) then
+                  # 「D AH L」が最後に来た場合
+                  if ['D'].include?(s_prev) and ['AH'].include?(s) and ['L'].include?(s_next) and ['EOS'].include?(s_next2) then
+                    if v == "e" then
+                      v = "o"
+                    end
+                  end
+                  # 「AH L」の場合
+                  if ['G','P'].include?(s_prev) and ['AH'].include?(s) and ['L'].include?(s_next) and ['D','Z','EOS'].include?(s_next2) then
+                    if v == "e" then
+                      v = "u"
+                    end
+                  end
+                  # カナに変換
                   yomi += ENG2KANA[s_prev][v]
                   # 「ッ」を追加するルール1
                   if ['B','D','F','G','K','L','P','R','T','V','HH','JH'].include?(s_prev) and

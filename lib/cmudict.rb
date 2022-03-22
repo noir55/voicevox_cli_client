@@ -152,7 +152,7 @@ class CMUDICT
                     end
                   end
                   # 「AH L」の場合
-                  if ['G','P'].include?(s_prev) and ['AH'].include?(s) and ['L'].include?(s_next) and ['D','Z','EOS'].include?(s_next2) then
+                  if ['B','G','P'].include?(s_prev) and ['AH'].include?(s) and ['L'].include?(s_next) and ['D','Z','EOS'].include?(s_next2) then
                     if v == "e" then
                       v = "u"
                     end

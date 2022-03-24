@@ -116,6 +116,13 @@ class CMUDICT
                 sound_list[index] = 'BOS_Y'
                 s = 'BOS_Y'
               end
+              # 「ッ」を追加するルール
+              if ['AE'].include?(s_prev) and
+                 ['P'].include?(s) and
+                 ['AH'].include?(s_next) and
+                 word[0..2] == "app" then
+                yomi  += "ッ"
+              end
               if ENG2KANA.key?(s) and not VOWELS.key?(s_next) then
                 if s_next == 'Y' then
                   yomi += ENG2KANA[s]['i'][0]
@@ -172,8 +179,15 @@ class CMUDICT
                      ['SH'].include?(s_next) and
                      ['AH'].include?(s_next2) then
                     yomi  += "ッ"
-                  # 「ョ」を追加するルール
                   end
+                  # 「ッ」を追加するルール
+                  if ['W'].include?(s_prev) and
+                     ['IH'].include?(s) and
+                     ['T'].include?(s_next) then
+                    yomi  += "ッ"
+                    yomi.sub!('ッッ','ッ')
+                  end
+                  # 「ョ」を追加するルール
                   if ['SH','ZH'].include?(s_prev) and
                      ['AH'].include?(s) and
                      ['N'].include?(s_next) then

@@ -167,7 +167,7 @@ class CMUDICT
                   # カナに変換
                   yomi += ENG2KANA[s_prev][v]
                   # 「ッ」を追加するルール1
-                  if ['B','D','F','G','K','L','P','R','T','V','HH','JH'].include?(s_prev) and
+                  if ['B','D','F','G','K','L','P','R','T','V','Z','HH','JH'].include?(s_prev) and
                      ['AA','AE','AH','IH','UH','EH','OH','AO'].include?(s) and
                      ['D','G','K','P','T','CH','SH'].include?(s_next) and
                      ['EOS'].include?(s_next2) then
@@ -192,8 +192,8 @@ class CMUDICT
                      ['AH'].include?(s) and
                      ['N'].include?(s_next) then
                     yomi += "ョ"
-                    #「ョ」が連続したら削除
                     yomi.sub!('ョョ','ョ')
+                    yomi.sub!(/([ャュ])ョ/,'\\1')
                   end
                 else
                   if ['AY','EY','OY'].include?(s_prev) and not ['AA','AH'].include?(s) then
@@ -211,7 +211,7 @@ class CMUDICT
                 end
                 if not VOWELS.key?(s_next) then
                   # 「OW」は最後にないときは伸ばす
-                  if ['OW'].include?(s) and (not ['EOS'].include?(s_next)) then
+                  if (not ['T'].include?(s_prev)) and ['OW'].include?(s) and (not ['EOS'].include?(s_next)) then
                     yomi += 'ー'
                   elsif ['ER','IY','UW'].include?(s) then
                     yomi += 'ー'
@@ -222,7 +222,7 @@ class CMUDICT
                 # 先頭に「AA D」「AO D」の場合「ー」を追加する
                 if ['BOS'].include?(s_prev) and
                    ['AA', 'AO'].include?(s) and
-                   ['D','S'].include?(s_next) and
+                   ['D','S','T'].include?(s_next) and
                    word[0..1] == "au" then
                   yomi += "ー"
                 end

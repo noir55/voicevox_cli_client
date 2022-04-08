@@ -187,6 +187,14 @@ class CMUDICT
                     yomi  += "ッ"
                     yomi.sub!('ッッ','ッ')
                   end
+                  # 「ッ」を追加するルール
+                  if ['N'].include?(s_prev) and
+                     ['AA'].include?(s) and
+                     ['K'].include?(s_next) and
+                     word =~ /^(knock)/ then
+                    yomi  += "ッ"
+                    yomi.sub!('ッッ','ッ')
+                  end
                   # 「ョ」を追加するルール
                   if ['SH','ZH'].include?(s_prev) and
                      ['AH'].include?(s) and

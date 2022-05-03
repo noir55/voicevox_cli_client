@@ -123,6 +123,13 @@ class CMUDICT
                  word[0..2] == "app" then
                 yomi  += "ッ"
               end
+              # 「ッ」を追加するルール
+              if ['AE'].include?(s_prev) and
+                 ['S'].include?(s) and
+                 ['IH'].include?(s_next) and
+                 word[1..4] == "assi" then
+                yomi  += "ッ"
+              end
               if ENG2KANA.key?(s) and not VOWELS.key?(s_next) then
                 if s_next == 'Y' then
                   yomi += ENG2KANA[s]['i'][0]
@@ -167,7 +174,7 @@ class CMUDICT
                   # カナに変換
                   yomi += ENG2KANA[s_prev][v]
                   # 「ッ」を追加するルール1
-                  if ['B','D','F','G','K','L','P','R','T','V','Z','HH','JH'].include?(s_prev) and
+                  if ['B','D','F','G','K','L','M','N','P','R','S','T','V','Z','HH','JH'].include?(s_prev) and
                      ['AA','AE','AH','IH','UH','EH','OH','AO'].include?(s) and
                      ['D','G','K','P','T','CH','SH'].include?(s_next) and
                      ['EOS'].include?(s_next2) then
@@ -183,7 +190,7 @@ class CMUDICT
                   # 「ッ」を追加するルール
                   if ['W'].include?(s_prev) and
                      ['IH'].include?(s) and
-                     ['T'].include?(s_next) then
+                     ['T','CH'].include?(s_next) then
                     yomi  += "ッ"
                     yomi.sub!('ッッ','ッ')
                   end
@@ -192,6 +199,14 @@ class CMUDICT
                      ['AA'].include?(s) and
                      ['K'].include?(s_next) and
                      word =~ /^(knock)/ then
+                    yomi  += "ッ"
+                    yomi.sub!('ッッ','ッ')
+                  end
+                  # 「ッ」を追加するルール
+                  if ['B'].include?(s_prev) and
+                     ['AE'].include?(s) and
+                     ['K'].include?(s_next) and
+                     word =~ /^(back|bakk)/ then
                     yomi  += "ッ"
                     yomi.sub!('ッッ','ッ')
                   end

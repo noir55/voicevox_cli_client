@@ -19,7 +19,7 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.2.3"
+VERSION="1.2.4"
 
 
 #------
@@ -748,11 +748,13 @@ end
 
 # speaker の値チェック
 debug_print("speaker=#{speaker}")
-if not speaker =~ /^[0-9]+$/ then
-  STDERR.print "\"-s (--speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかを整数で指定してください\n"
+if not speaker =~ /^([0-9]+|[Rr])$/ then
+  STDERR.print "\"-s (--speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかの整数、または r を指定してください\n"
   exit 1
+elsif speaker =~ /^[Rr]$/ then
+  speaker = RANDOM_SPEAKER.sample
 elsif speaker.to_i < 0 or MAX_SPEAKER_ID < speaker.to_i then
-  STDERR.print "\"-s (--speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかを整数で指定してください\n"
+  STDERR.print "\"-s (--speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかの整数、または r を指定してください\n"
   exit 1
 end
 
@@ -1066,7 +1068,7 @@ conv_text.each{|text|
         # もし、「sr」「sR」だったら声の種類をランダムに設定
         elsif temp =~ /^ *s[rR] *$/ then
           # 配列からランダムに1つの値を取り出す
-          speaker = [0,1,2,3,4,5,6,7,8,8,8,8,9,9,9,9,10,10,10,10,11,11,11,11,12,12,12,12,13,13,13,13,14,14,14,14,15,16,17,18,19].sample
+          speaker = RANDOM_SPEAKER.sample
         # もし、「q<数字>」だったら、クエリの声の種類を変更
         elsif temp =~ /^ *q([0-9]+) *$/ then
           query_speaker = $1.to_i

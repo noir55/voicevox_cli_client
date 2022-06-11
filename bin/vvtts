@@ -19,7 +19,7 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.2.4"
+VERSION="1.2.5"
 
 
 #------
@@ -35,7 +35,7 @@ else
 end
 
 # 指定できるSpeakerIDの最大値
-MAX_SPEAKER_ID = 19
+MAX_SPEAKER_ID = 20
 
 
 #----------

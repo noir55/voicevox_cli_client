@@ -19,18 +19,30 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.2.6"
+VERSION="1.2.7"
 
 
 #------
 # 設定
 #------
 
+# デフォルトの設定ファイル
+config_file_path = "#{File.dirname(__dir__)}/etc/config.rb"
+
+# 設定ファイルがオプションで指定されていたら上書き
+ARGV.each_with_index{|value,index|
+  if value =~ /^(-c|--config)$/ then
+    config_file_path = ARGV[index+1]
+  elsif value =~ /^--config=(.*)$/ then
+    config_file_path = $1
+  end
+}
+
 # 設定ファイルを読み込む
-if File.exist?("#{__dir__}/../etc/config.rb")
-  require_relative '../etc/config.rb'
+if File.exist?(config_file_path)
+  require_relative "#{config_file_path}"
 else
-  STDOUT.print "設定ファイル \"#{__dir__}/../etc/config.rb\" が見つかりません"
+  STDOUT.print "設定ファイル \"#{config_file_path}\" が見つかりません\n"
   exit 1
 end
 
@@ -698,6 +710,7 @@ opt.on('-i', '--interval INTERVAL_SECOND', '文章間の時間を指定します
 opt.on('-I', '--paragraph-interval INTERVAL_SECOND', '文節間の時間を指定します (秒)'){|v| paragraph_interval_time = v.to_f }
 opt.on('-q', '--quiet', '標準出力に何も表示しません') {|v| quiet_flag = 1 }
 opt.on('-v', '--verbous', '標準出力に読み上げエンジンに渡される文字列も表示します') {|v| verbous_flag = 1 }
+opt.on('-c', '--config CONFIG_FILE', '設定ファイルを指定します'){|v| config_file_path = v }
 opt.on('--first FIRST_SILENT_TIME', '最初の無音時間を指定します (秒)'){|v| first_silent_time = v.to_f }
 opt.on('--last LAST_SILENT_TIME', '最後の無音時間を指定します (秒)'){|v| last_silent_time = v.to_f }
 opt.on('--stdout', '全ての音声変換後に音声データを標準出力に出力') {|v| stdout_flag = 1 }

@@ -5,7 +5,7 @@ require 'json'
 require 'cgi'
 
 # バージョン
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 
 #------
@@ -152,7 +152,7 @@ def mode_listadd(listfile)
       # 各単語ごとに処理
       surfaces.each_with_index{|value,index|
         # エンジンごとに処理
-        VOICEVOX_ENGINE.each{|server|
+        @engines.each{|server|
           # 辞書に単語を追加
           retval = add_dict(server,surfaces[index],prons[index],accents[index])
           if retval == 0 then
@@ -181,7 +181,7 @@ def mode_deleteall()
   fail_flag = 0
 
   # エンジンごとに処理
-  VOICEVOX_ENGINE.each{|server|
+  @engines.each{|server|
     # 現在登録されているUUIDを調べる
     dict = get_dict(server)
     if dict.length > 0 then
@@ -215,6 +215,9 @@ end
 
 # デバッグモードを使用するかどうかを格納する変数
 @debug_flag = 0
+
+# VOICEVOX ENGINEの重複を取り除く
+@engines = VOICEVOX_ENGINE.uniq
 
 # 動作モードを格納する変数
 mode = ""
@@ -318,7 +321,7 @@ elsif mode == "add" then
 
   debug_print("単語=#{surface} 読み=#{pron} アクセントタイプ=#{accent}")
   # エンジンごとに処理
-  VOICEVOX_ENGINE.each{|server|
+  @engines.each{|server|
     # 重複フラグを初期化
     duplicate_flag = 0
     # 現在登録されているかどうか調べる
@@ -382,7 +385,7 @@ elsif mode == "mod" then
   # UUIDを格納する変数を初期化
   mod_uuid = ""
   # エンジンごとに処理
-  VOICEVOX_ENGINE.each{|server|
+  @engines.each{|server|
     # 現在登録されているUUIDを調べる
     dict = get_dict(server)
     dict.each{|uuid,data|
@@ -421,7 +424,7 @@ elsif mode == "del" then
   # UUIDを格納する変数を初期化
   mod_uuid = ""
   # エンジンごとに処理
-  VOICEVOX_ENGINE.each{|server|
+  @engines.each{|server|
     # 現在登録されているUUIDを調べる
     dict = get_dict(server)
     dict.each{|uuid,data|

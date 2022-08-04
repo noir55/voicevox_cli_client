@@ -47,7 +47,7 @@ else
 end
 
 # 指定できるSpeakerIDの最大値
-MAX_SPEAKER_ID = 21
+MAX_SPEAKER_ID = 22
 
 
 #----------
@@ -1657,4 +1657,3 @@ end
 # デバッグメッセージ
 debug_print("処理を完了しました")
 exit 0
-

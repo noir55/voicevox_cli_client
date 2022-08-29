@@ -19,7 +19,7 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.2.7"
+VERSION="1.2.8"
 
 
 #------
@@ -28,6 +28,9 @@ VERSION="1.2.7"
 
 # デフォルトの設定ファイル
 config_file_path = "#{File.dirname(__dir__)}/etc/config.rb"
+
+# デフォルトの置換リストファイル
+replace_list_file_path = "#{File.dirname(__dir__)}/etc/replace.list"
 
 # 設定ファイルがオプションで指定されていたら上書き
 ARGV.each_with_index{|value,index|
@@ -264,16 +267,16 @@ end
 
 
 # 置換リストを読み込む関数
-def load_replace_list()
+def load_replace_list(replace_list_file_path)
 
   # 置換前文字列と置換後対応を格納するハッシュ
   repl_hash = Hash.new
 
   # dict.datファイルがあれば読み込む
-  if File.exist?("#{__dir__}/../etc/replace.list") then
+  if File.exist?(replace_list_file_path) then
 
     # １行づつ処理
-    File.open("#{__dir__}/../etc/replace.list"){|f|
+    File.open(replace_list_file_path){|f|
       f.each_line{|line|
 
         # 行頭が「#」以外の行を置換リストとして読み込む
@@ -711,6 +714,7 @@ opt.on('-I', '--paragraph-interval INTERVAL_SECOND', '文節間の時間を指�
 opt.on('-q', '--quiet', '標準出力に何も表示しません') {|v| quiet_flag = 1 }
 opt.on('-v', '--verbous', '標準出力に読み上げエンジンに渡される文字列も表示します') {|v| verbous_flag = 1 }
 opt.on('-c', '--config CONFIG_FILE', '設定ファイルを指定します'){|v| config_file_path = v }
+opt.on('-r', '--replace REPLACE_FILE', '置換リストファイルを指定します'){|v| replace_list_file_path = v }
 opt.on('--first FIRST_SILENT_TIME', '最初の無音時間を指定します (秒)'){|v| first_silent_time = v.to_f }
 opt.on('--last LAST_SILENT_TIME', '最後の無音時間を指定します (秒)'){|v| last_silent_time = v.to_f }
 opt.on('--stdout', '全ての音声変換後に音声データを標準出力に出力') {|v| stdout_flag = 1 }
@@ -1182,7 +1186,7 @@ conv_text.each{|text|
   if raw_flag == 0 then
 
     # 置換リストを読み込む
-    repl_hash = load_replace_list()
+    repl_hash = load_replace_list(replace_list_file_path)
 
     # 文字列の置換処理を実施
     input_text.each {|ikey,ivalue|

@@ -50,7 +50,7 @@ else
 end
 
 # 指定できるSpeakerIDの最大値
-MAX_SPEAKER_ID = 22
+MAX_SPEAKER_ID = 35
 
 
 #----------

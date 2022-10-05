@@ -5,7 +5,7 @@ require 'json'
 require 'cgi'
 
 # バージョン
-VERSION="1.0.1"
+VERSION="1.1.0"
 
 
 #------
@@ -57,12 +57,12 @@ def get_dict(server)
 end
 
 # ユーザ辞書に単語を追加する関数
-def add_dict(server,surface,pron,accent)
+def add_dict(server,surface,pron,accent,priority=5)
   # 各値をURLエンコードする
   enc_surface = URI.encode(surface)
   enc_pron = URI.encode(pron)
   enc_accent = URI.encode(accent.to_s)
-  uri = "http://#{server}/user_dict_word?surface=#{enc_surface}&pronunciation=#{enc_pron}&accent_type=#{enc_accent}"
+  uri = "http://#{server}/user_dict_word?surface=#{enc_surface}&pronunciation=#{enc_pron}&accent_type=#{enc_accent}&priority=#{priority}"
   debug_print("辞書追加 URI=\"#{uri}\"")
   res = Net::HTTP.post_form(URI.parse(uri), 'body' => nil)
   debug_print("code=#{res.code} msg=#{res.msg}")
@@ -74,12 +74,12 @@ def add_dict(server,surface,pron,accent)
 end
 
 # ユーザ辞書の単語を修正する関数
-def mod_dict(server,uuid,surface,pron,accent)
+def mod_dict(server,uuid,surface,pron,accent,priority=5)
   # 各値をURLエンコードする
   enc_surface = URI.encode(surface)
   enc_pron = URI.encode(pron)
   enc_accent = URI.encode(accent.to_s)
-  uri = "http://#{server}/user_dict_word/#{uuid}?surface=#{enc_surface}&pronunciation=#{enc_pron}&accent_type=#{enc_accent}"
+  uri = "http://#{server}/user_dict_word/#{uuid}?surface=#{enc_surface}&pronunciation=#{enc_pron}&accent_type=#{enc_accent}&priority=#{priority}"
   debug_print("辞書修正 URI=\"#{uri}\"")
   req = Net::HTTP.new(URI.parse(uri).host, URI.parse(uri).port)
   res = req.put(URI.parse(uri), nil)
@@ -105,47 +105,81 @@ def del_dict(server,uuid)
   end
 end
 
-# deleteall 実行時の関数
+# listadd 実行時の関数
 def mode_listadd(listfile)
-
   if not File.exist?(listfile) then
     STDERR.print "ファイル \"#{listfile}\" がありません\n"
     exit 1
   else
-
     debug_print("Open listfile \"#{listfile}\"")
-
     surfaces = Array.new
     prons = Array.new
     accents = Array.new
+    priorities = Array.new
     print "リストファイル \"#{listfile}\" から辞書登録します\n"
+    # 重複フラグを初期化
+    duplicate_flag = 0
     # リストファイルを読み込む
     File.open(listfile, "r"){|r|
       i = 1
       # 1行づつ処理する
       r.each_line{|line|
         # 空行と(先頭が#の)コメント行は無視して、それ以外を処理
-        if line !~ /^[ 　\t]+$/ and line != /^#/ then
+        if line !~ /^[ 　\t]+$/ and line !~ /^#/ then
           surface = ""
           pron = ""
           accent = -1
+          priority = "5"
           # タブ区切りで値を取得
-          surface, pron, accent = line.chomp.split(/\t/)
-          # 全ての項目がきちんと記述されている場合のみ登録候補にする
-          if surface != "" and pron =~ /\A[ァ-ヶー－]+\z/ and accent =~ /^[0-9]+$/ then
-            # 英数字は全角にしておく
-            surface = half_to_full(surface)
-            surfaces << surface
-            prons << pron
-            accents << accent
-          else
-            STDERR.print "Info: \"#{line.chomp}\" 行は正しくないため無視します (line:#{i})\n"
+          surface, pron, accent, temp = line.chomp.split(/\t/)
+          # 半角英数字は辞書の中では全角英数字として登録されるため、あらかじめ変換
+          surface=half_to_full(surface)
+          debug_print("surface=#{surface} pron=#{pron} accent=#{accent} temp=#{temp}")
+          # 4番目の値が1～9の整数だったら優先度としてセットする
+          if not temp.nil? then
+            if temp =~ /^[1-9]$/ then
+              priority = temp
+            else
+              STDERR.print "単語 \"#{surface}\" の優先度が正しくありません。1～9 の整数を指定してください (\"#{temp}\" line:#{i})\n"
+              exit 1
+            end
           end
-          # 行番号を増やす
-          i += 1
+          # 全ての項目がきちんと記述されている場合のみ登録候補にする
+          if surface != "" and pron =~ /\A[ァ-ヶー－]+\z/ and accent =~ /^[0-9]+$/ and priority =~ /^[1-9]$/ then
+            # エンジンごとに処理
+            @engines.each{|server|
+              # 現在登録されているかどうか調べる
+              dict = get_dict(server)
+              dict.each{|uuid,data|
+                if surface == data['surface'] then
+                  duplicate_flag = 1
+                  print "単語 \"#{full_to_half(surface)}\" はすでに追加されています (server=\"#{server}\")\n"
+                  break
+                end
+              }
+            }
+            # 重複がなければ
+            if duplicate_flag == 0 then
+              # 英数字は全角にしておく
+              surface = half_to_full(surface)
+              surfaces << surface
+              prons << pron
+              accents << accent
+              priorities << priority
+            end
+          end
+        else
+          debug_print("\"#{line.chomp}\" 行は無視します (line:#{i})")
         end
+        # 行番号を増やす
+        i += 1
       }
     }
+    # 重複がある場合は登録を実行しない
+    if duplicate_flag == 1 then
+      STDERR.print "すでに登録済みの単語があるため登録は行いません\n"
+      exit 1
+    end
     # 登録候補がある場合に登録を実施する
     if surfaces.length > 0 then
       fail_flag = 0
@@ -154,17 +188,17 @@ def mode_listadd(listfile)
         # エンジンごとに処理
         @engines.each{|server|
           # 辞書に単語を追加
-          retval = add_dict(server,surfaces[index],prons[index],accents[index])
+          retval = add_dict(server,surfaces[index],prons[index],accents[index],priorities[index])
           if retval == 0 then
-            print "単語 \"#{full_to_half(surfaces[index])}\" 読み \"#{prons[index]}\" を追加しました (server=\"#{server}\")\n"
+            print "単語 \"#{full_to_half(surfaces[index])}\" 読み \"#{prons[index]}\" 優先度 \"#{priorities[index]}\" を追加しました (server=\"#{server}\")\n"
           else
-            print "単語 \"#{full_to_half(surfaces[index])}\" 読み \"#{prons[index]}\" の追加に失敗しました (server=\"#{server}\")\n"
+            print "単語 \"#{full_to_half(surfaces[index])}\" 読み \"#{prons[index]}\" 優先度 \"#{priorities[index]}\" の追加に失敗しました (server=\"#{server}\")\n"
             fail_flag = 1
           end
         }
       }
     else
-        STDERR.print "登録候補の情報がないため登録は行いません\n"
+      STDERR.print "登録候補の情報がないため登録は行いません\n"
     end
   end
   if fail_flag == 0 then
@@ -176,10 +210,8 @@ end
 
 # deleteall 実行時の関数
 def mode_deleteall()
-
   # 失敗フラグ
   fail_flag = 0
-
   # エンジンごとに処理
   @engines.each{|server|
     # 現在登録されているUUIDを調べる
@@ -228,6 +260,12 @@ if ARGV.length < 1 then
   exit 1
 end
 
+# バージョン表示オプションが指定されている場合
+if ARGV[0] == "--version" then
+  print "#{VERSION}\n"
+  exit
+end
+
 # 1番目の引数をmodeに格納
 mode = ARGV[0]
 options = ARGV[1..-1]
@@ -247,6 +285,8 @@ surface = ""
 pron = ""
 # アクセント核位置(整数)を格納する変数を初期化
 accent = -1
+# プライオリティ(1～9)を格納する変数を初期化
+priority = 5
 
 # オプションを全て読み出すまで繰り返し
 while options.length > 0 do
@@ -266,6 +306,12 @@ while options.length > 0 do
       exit 1
     end
     accent = options[0].to_i
+  elsif priority == 5 then
+    if options[0] !~ /^[1-9]$/ then
+      STDERR.print "優先度は1～9の整数で指定してください(#{options[0]})\n"
+      exit 1
+    end
+    priority = options[0].to_i
   end
   # 先頭のオプションを削除
   options.shift
@@ -284,18 +330,21 @@ if mode == "show" then
   # 1台のエンジンだけから情報を取得する
   first_server = VOICEVOX_ENGINE[0]
   print_data = Array.new
+  print_data << "# 単語\t読み(カタカナ)\tアクセント核位置(設定数の次の発音でピッチ下降)\t優先度(1～9 数字が大きいほど優先度が高い)"
   # 情報を取得
   dict = get_dict(first_server)
   if dict.nil? then
     STDERR.print "辞書の一覧取得に失敗しました (server=#{first_server})\n"
   else
     dict.each{|uuid,data|
-      print_data << "#{full_to_half(data['surface'])}\t#{data['pronunciation']}\t#{data['accent_type']}"
+      print_data << "#{full_to_half(data['surface'])}\t#{data['pronunciation']}\t#{data['accent_type']}\t#{data['priority']}"
     }
   end
-  print_data.sort.each{|value|
-    print "#{value}\n"
-  }
+  if print_data.length > 1 then
+    print_data.sort.each{|value|
+      print "#{value}\n"
+    }
+  end
 
 
 # サブコマンドが「add」の場合
@@ -303,7 +352,7 @@ elsif mode == "add" then
 
   # オプションが指定されていなかったら
   if surface == "" or pron == "" or accent == -1 then
-    STDERR.print "Usage: #{__FILE__} add SURFACE PRONUNCIATION ACCENT_TYPE\n"
+    STDERR.print "Usage: #{__FILE__} add SURFACE PRONUNCIATION ACCENT_TYPE [PRIORITY]\n"
     exit 1
   end
 
@@ -319,6 +368,12 @@ elsif mode == "add" then
     exit 1
   end
 
+  # 優先度が1～9の整数でなかったらエラーにする
+  if priority.to_s !~ /^[1-9]$/ then
+    STDERR.print "優先度は半角で1～9の整数を入力してください\n"
+    exit 1
+  end
+
   debug_print("単語=#{surface} 読み=#{pron} アクセントタイプ=#{accent}")
   # エンジンごとに処理
   @engines.each{|server|
@@ -328,6 +383,7 @@ elsif mode == "add" then
     dict = get_dict(server)
     dict.each{|uuid,data|
       if surface == data['surface'] then
+        debug_print("surface=#{surface} data=#{data['surface']}")
 	duplicate_flag = 1
         break
       end
@@ -336,11 +392,11 @@ elsif mode == "add" then
       print "単語 \"#{full_to_half(surface)}\" はすでに追加されています (server=\"#{server}\")\n"
     else
       # 辞書に単語を追加
-      retval = add_dict(server,surface,pron,accent)
+      retval = add_dict(server,surface,pron,accent,priority)
       if retval == 0 then
-        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" を追加しました (server=\"#{server}\")\n"
+        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" 優先度 \"#{priority}\" を追加しました (server=\"#{server}\")\n"
       else
-        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" の追加に失敗しました (server=\"#{server}\")\n"
+        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" 優先度 \"#{priority}\" の追加に失敗しました (server=\"#{server}\")\n"
       end
     end
   }
@@ -367,7 +423,7 @@ elsif mode == "mod" then
 
   # オプションが指定されていなかったら
   if surface == "" or pron == "" or accent == -1 then
-    STDERR.print "Usage: #{__FILE__} mod SURFACE PRONUNCIATION ACCENT_TYPE\n"
+    STDERR.print "Usage: #{__FILE__} mod SURFACE PRONUNCIATION ACCENT_TYPE [PRIORITY]\n"
     exit 1
   end
   # 読み方が全角カタカナでなかったらエラーにする
@@ -379,6 +435,12 @@ elsif mode == "mod" then
   # アクセント核位置が整数でなかったらエラーにする
   if accent.to_s !~ /^[0-9]+$/ then
     STDERR.print "アクセント核位置は半角で整数を入力してください\n"
+    exit 1
+  end
+
+  # 優先度が1～9の整数でなかったらエラーにする
+  if priority.to_s !~ /^[1-9]$/ then
+    STDERR.print "優先度は半角で1～9の整数を入力してください\n"
     exit 1
   end
 
@@ -401,12 +463,12 @@ elsif mode == "mod" then
     else
       debug_print("UUID=#{mod_uuid}")
       # 辞書の単語を修正
-      retval = mod_dict(server,mod_uuid,surface,pron,accent)
+      retval = mod_dict(server,mod_uuid,surface,pron,accent,priority)
       # メッセージ表示
       if retval == 0 then
-        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" に更新しました (server=\"#{server}\")\n"
+        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" 優先度 \"#{priority}\" に更新しました (server=\"#{server}\")\n"
       else
-        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" の更新に失敗しました (server=\"#{server}\")\n"
+        print "単語 \"#{full_to_half(surface)}\" 読み \"#{pron}\" 優先度 \"#{priority}\" の更新に失敗しました (server=\"#{server}\")\n"
       end
     end
   }

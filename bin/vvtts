@@ -26,6 +26,18 @@ VERSION="1.2.9"
 # 設定
 #------
 
+# VOICEVOX ENGINEのバージョンと、指定できるSpeakerIDの最大値
+VERSION_TO_MAX_SPEAKER_ID = {
+  "0.9.1" => 9,
+  "0.9.4" => 10,
+  "0.11.0" => 14,
+  "0.11.4" => 19,
+  "0.12.2" => 20,
+  "0.12.3" => 21,
+  "0.12.4" => 22,
+  "0.13.1" => 35,
+}
+
 # デフォルトの設定ファイル
 config_file_path = "#{File.dirname(__dir__)}/etc/config.rb"
 
@@ -49,9 +61,6 @@ else
   exit 1
 end
 
-# 指定できるSpeakerIDの最大値
-MAX_SPEAKER_ID = 35
-
 
 #----------
 # 関数定義
@@ -69,12 +78,12 @@ end
 def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
 
   # speakerの値チェック
-  if speaker.to_i < 0 or MAX_SPEAKER_ID < speaker.to_i then
+  if speaker.to_i < 0 or @max_speaker_id < speaker.to_i then
     STDERR.print "speaker の値が正しくありません (\"#{speaker}\")\n"
   end
 
   # query_speakerの値チェック
-  if query_speaker != "" and ( query_speaker.to_i < 0 or MAX_SPEAKER_ID < query_speaker.to_i ) then
+  if query_speaker != "" and ( query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i ) then
     STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
   end
 
@@ -167,17 +176,17 @@ end
 def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
 
   # base_speakerの値チェック
-  if base_speaker.to_i < 0 or MAX_SPEAKER_ID < base_speaker.to_i then
+  if base_speaker.to_i < 0 or @max_speaker_id < base_speaker.to_i then
     STDERR.print "base_speaker の値が正しくありません (\"#{base_speaker}\")\n"
   end
 
   # target_speakerの値チェック
-  if target_speaker.to_i < 0 or MAX_SPEAKER_ID < target_speaker.to_i then
+  if target_speaker.to_i < 0 or @max_speaker_id < target_speaker.to_i then
     STDERR.print "target_speaker の値が正しくありません (\"#{target_speaker}\")\n"
   end
 
   # query_speakerの値チェック
-  if query_speaker != "" and ( query_speaker.to_i < 0 or MAX_SPEAKER_ID < query_speaker.to_i ) then
+  if query_speaker != "" and ( query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i ) then
     STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
   end
 
@@ -700,15 +709,57 @@ output_filename = ""
 # 1つのファイルに出力させるフラグを初期化
 single_output_flag = 0
 
+# 指定できるSpeakerIDの最大値
+@max_speaker_id = 0
+
+# 最初のVOICEVOX ENGINEからバージョン番号を取得
+uri = URI.parse("http://#{VOICEVOX_ENGINE[0]}/version")
+http = Net::HTTP.new(uri.host, uri.port)
+res = nil
+begin
+  Timeout.timeout(5){
+    res = http.get(uri)
+  }
+rescue Timeout::Error
+  res = nil
+end
+if (not res.nil?) and res.body =~ /^\"([0-9]+)\.([0-9]+)\.([0-9]+)\"$/ then
+  maj_version = $1.to_i
+  min_version = $2.to_i
+  revision = $3.to_i
+else
+  STDERR.print "voicevox engineのバージョン番号を取得できません\n"
+  exit 1
+end
+
+# VOICEVOX ENGINEのバージョンからSpeakerIDの最大値を求める
+VERSION_TO_MAX_SPEAKER_ID.each{|version,maxspeakerid|
+  if version =~ /^([0-9]+)\.([0-9]+)\.([0-9]+)$/ then
+    maj = $1.to_i
+    min = $2.to_i
+    rev = $3.to_i
+    if maj_version >= maj and min_version >= min and revision >= rev then
+      @max_speaker_id = VERSION_TO_MAX_SPEAKER_ID[version]
+    end
+  else
+    STDERR.print "VERSION_TO_MAX_SPEAKER_IDのバージョン指定が正しくありません\n"
+    exit 1
+  end
+}
+if @max_speaker_id == 0 then
+  STDERR.print "指定可能なSperkerIDの最大値が不明です\n"
+  exit 1
+end
+
 # オプションで指定されていたら上書き
 opt = OptionParser.new
 opt.on('-f', '--file TEXT_FILE', 'テキストファイルの内容を音声変換します'){|v| message_file = v }
 opt.on('-o', '--output FILENAME_PREFIX', '出力ファイル名を指定します (拡張子は不要)') {|v| output_filename = v }
 opt.on('-1', '--single', 'テキスト全体を1つのファイルに出力します') {|v| single_output_flag = 1 }
 opt.on('-p', '--play', 'ファイルに出力せず、全ての音声変換後に読み上げを行います') {|v| play_flag = 1 }
-opt.on('-s', '--speaker NUMBER', "声の種類を指定します (0-#{MAX_SPEAKER_ID})") {|v| speaker = v }
-opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (0-#{MAX_SPEAKER_ID}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
-opt.on('--query NUMBER', "クエリ時の声の種類を指定します (0-#{MAX_SPEAKER_ID})") {|v| query_speaker = v }
+opt.on('-s', '--speaker NUMBER', "声の種類を指定します (0-#{@max_speaker_id})") {|v| speaker = v }
+opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (0-#{@max_speaker_id}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
+opt.on('--query NUMBER', "クエリ時の声の種類を指定します (0-#{@max_speaker_id})") {|v| query_speaker = v }
 opt.on('-i', '--interval INTERVAL_SECOND', '文章間の時間を指定します (秒)'){|v| interval_time = v.to_f }
 opt.on('-I', '--paragraph-interval INTERVAL_SECOND', '文節間の時間を指定します (秒)'){|v| paragraph_interval_time = v.to_f }
 opt.on('-q', '--quiet', '標準出力に何も表示しません') {|v| quiet_flag = 1 }
@@ -755,7 +806,7 @@ if check_flag == 1 then
       res = nil
     end
     if (not res.nil?) and res.body =~ /^\"[0-9]+\.[0-9]+\.[0-9]+\"$/ then
-      print "voicevox engine=#{server} version=#{res.body.chomp} status=OK\n"
+      print "voicevox engine=#{server} version=#{res.body.chomp} max_speaker_id=#{@max_speaker_id} status=OK\n"
     else
       print "voicevox engine=#{server} status=NG\n"
     end
@@ -766,12 +817,23 @@ end
 # speaker の値チェック
 debug_print("speaker=#{speaker}")
 if not speaker =~ /^([0-9]+|[Rr])$/ then
-  STDERR.print "\"-s (--speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかの整数、または r を指定してください\n"
+  STDERR.print "\"-s (--speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数、または r を指定してください\n"
   exit 1
 elsif speaker =~ /^[Rr]$/ then
-  speaker = RANDOM_SPEAKER.sample
-elsif speaker.to_i < 0 or MAX_SPEAKER_ID < speaker.to_i then
-  STDERR.print "\"-s (--speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかの整数、または r を指定してください\n"
+  # 配列RANDOM_SPEAKERから選ばれた値が@max_speaker_id以下になるまで繰り返す
+  counter=0
+  while true do
+    speaker = RANDOM_SPEAKER.sample
+    if speaker <= @max_speaker_id then
+      break
+    elsif counter > 1000 then
+      STDERR.print "設定RANDOM_SPEAKERの値からランダムなSpeakerIDを選択しましたが、利用のVOICEVOX ENGINEバージョンで使用できませんでした\n"
+      exit 1
+    end
+    counter+=1
+  end
+elsif speaker.to_i < 0 or @max_speaker_id < speaker.to_i then
+  STDERR.print "\"-s (--speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数、または r を指定してください\n"
   exit 1
 end
 
@@ -779,10 +841,10 @@ end
 if query_speaker != "" then
   debug_print("query_speaker=#{query_speaker}")
   if not query_speaker =~ /^[0-9]+$/ then
-    STDERR.print "\"--query\" の値は、0～#{MAX_SPEAKER_ID} のいずれかを整数で指定してください\n"
+    STDERR.print "\"--query\" の値は、0～#{@max_speaker_id} のいずれかを整数で指定してください\n"
     exit 1
-  elsif query_speaker.to_i < 0 or MAX_SPEAKER_ID < query_speaker.to_i then
-    STDERR.print "\"--query\" の値は、0～#{MAX_SPEAKER_ID} のいずれかを整数で指定してください\n"
+  elsif query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i then
+    STDERR.print "\"--query\" の値は、0～#{@max_speaker_id} のいずれかを整数で指定してください\n"
     exit 1
   end
 end
@@ -791,11 +853,11 @@ end
 debug_print("morph_speaker=#{morph_speaker}, morph_rate=#{morph_rate}")
 if morph_speaker != "" or morph_rate != "" then
   if (not morph_speaker =~ /^[0-9]+$/) or (not morph_rate =~ /^[0-9]\.[0-9]$/) then
-    STDERR.print "\"-m (--morph_speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかの整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
+    STDERR.print "\"-m (--morph_speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
     exit 1
   end
-  if morph_rate.to_f < 0.0 or 1.0 < morph_rate.to_f or morph_speaker.to_i < 0 or MAX_SPEAKER_ID < morph_speaker.to_i then
-    STDERR.print "\"-m (--morph_speaker)\" の値は、0～#{MAX_SPEAKER_ID} のいずれかの整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
+  if morph_rate.to_f < 0.0 or 1.0 < morph_rate.to_f or morph_speaker.to_i < 0 or @max_speaker_id < morph_speaker.to_i then
+    STDERR.print "\"-m (--morph_speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
     exit 1
   end
 end
@@ -1084,8 +1146,18 @@ conv_text.each{|text|
           speaker = $1.to_i
         # もし、「sr」「sR」だったら声の種類をランダムに設定
         elsif temp =~ /^ *s[rR] *$/ then
-          # 配列からランダムに1つの値を取り出す
-          speaker = RANDOM_SPEAKER.sample
+          # 配列RANDOM_SPEAKERから選ばれた値が@max_speaker_id以下になるまで繰り返す
+          counter=0
+          while true do
+            speaker = RANDOM_SPEAKER.sample
+            if speaker <= @max_speaker_id then
+              break
+            elsif counter > 1000 then
+              STDERR.print "設設定RANDOM_SPEAKERの値からランダムなSpeakerIDを選択しましたが、利用のVOICEVOX ENGINEバージョンで使用できませんでした\n"
+              exit 1
+            end
+            counter+=1
+          end
         # もし、「q<数字>」だったら、クエリの声の種類を変更
         elsif temp =~ /^ *q([0-9]+) *$/ then
           query_speaker = $1.to_i

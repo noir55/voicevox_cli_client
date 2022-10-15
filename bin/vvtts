@@ -28,6 +28,7 @@ VERSION="1.2.9"
 
 # VOICEVOX ENGINEのバージョンと、指定できるSpeakerIDの最大値
 VERSION_TO_MAX_SPEAKER_ID = {
+  "0.0.0" => 8,
   "0.9.1" => 9,
   "0.9.4" => 10,
   "0.11.0" => 14,
@@ -307,12 +308,12 @@ end
 
 
 # 音声データを再生する関数
-def play_wav(wavdata, rdp_flag)
+def play_wav(play_command, wavdata, rdp_flag)
 
   debug_print("再生します (datasize=#{wavdata.size})")
 
   # aplayコマンドで再生する場合
-  if PLAY_CMD == "aplay" then
+  if play_command == "aplay" then
 
     # オプションで「--rdp」が指定されている場合
     if rdp_flag == 1 then
@@ -332,7 +333,7 @@ def play_wav(wavdata, rdp_flag)
     end
 
   # sox(play)コマンドで再生する場合
-  elsif PLAY_CMD == "sox" then
+  elsif play_command == "sox" then
 
     # オプションで「--no-rdp」が指定されている場合
     if rdp_flag == 2 then
@@ -356,6 +357,7 @@ def play_wav(wavdata, rdp_flag)
   end
 
   # 再生コマンドにパイプで音声データを渡して実行
+  debug_print("再生コマンド \"#{play_cmd}\"")
   Open3.capture3(play_cmd, :stdin_data=>wavdata)
 
 end
@@ -504,12 +506,14 @@ def conv2mp3(conv_command, input_wav_file, output_mp3_file)
   if conv_command == "sox" then
 
     # soxコマンドを使用して変換する
+    debug_print("mp3変換コマンド \"sox #{input_wav_file}.wav #{SOX_OPT1} #{output_mp3_file}.mp3 #{SOX_OPT2}\"")
     system("sox #{input_wav_file}.wav #{SOX_OPT1} #{output_mp3_file}.mp3 #{SOX_OPT2} >/dev/null 2>&1")
 
   # 変換コマンドがffmpegだったら
   elsif conv_command == "ffmpeg" then
 
     # ffmpegコマンドを使用して変換する
+    debug_print("mp3変換コマンド \"ffmpeg -i #{input_wav_file}.wav #{FFMPEG_OPT} #{output_mp3_file}.mp3\"")
     system("ffmpeg -i #{input_wav_file}.wav #{FFMPEG_OPT} #{output_mp3_file}.mp3 >/dev/null 2>&1")
 
   # 変換コマンドがそれ以外だったら
@@ -904,47 +908,86 @@ end
 
 # 再生フラグが1の場合
 if play_flag == 1 then
-  # aplayコマンドを使用する場合
-  if PLAY_CMD == "aplay" then
+
+  #　PLAY_CMD に値「aplay」または「sox」が設定されていたらその値をセットする
+  if PLAY_CMD == "aplay" or PLAY_CMD == "sox" then
+    play_command = PLAY_CMD
+    debug_print("#{play_command}を使用して再生を実行します")
+    # コマンドがあるかチェック
+    if play_command == "aplay" then
+      num = `which #{play_command} | wc -l 2>/dev/null`
+      if num.to_i == 0 then
+        STDERR.print "音声を再生するためのコマンド \"#{play_command}\" が見つからないため、再生できません\n"
+        exit 1
+      end
+    elsif play_command == "sox" then
+      num = `which play | wc -l 2>/dev/null`
+      if num.to_i == 0 then
+        STDERR.print "音声を再生するためのコマンド \"play(sox)\" が見つからないため、再生できません\n"
+        exit 1
+      end
+    end
+  # PLAY_CMD の値が空だったり、正しくない場合は使えるコマンドがないか調べる
+  else
+    debug_print("再生コマンドを検索します")
     # aplayコマンドがあるかチェック
     num = `which aplay | wc -l 2>/dev/null`
-    if num.to_i <= 0 then
-      STDERR.print "音声を再生するためのコマンド \"aplay\" が見つからないため処理を終了します\n"
-      exit 1
+    # aplayコマンドが見つかった場合
+    if num.to_i > 0 then
+      debug_print("aplayコマンドが見つかりました")
+      play_command = "aplay"
+    # aplayコマンドが見つからない場合
+    else
+      # soxコマンドがあるかチェック
+      num = `which play | wc -l 2>/dev/null`
+      # soxコマンドが見つかった場合
+      if num.to_i > 0 then
+        debug_print("play(sox)コマンドが見つかりました")
+        play_command = "sox"
+      # soxコマンドも見つからない場合
+      else
+        STDERR.print "コマンド \"aplay\" か \"play(sox)\" がともに見つからないため、再生はできません\n"
+        exit 1
+      end
     end
-  # playコマンドを使用する場合
-  elsif PLAY_CMD == "sox" then
-    # playコマンドがあるかチェック
-    num = `which play | wc -l 2>/dev/null`
-    if num.to_i <= 0 then
-      STDERR.print "音声を再生するためのコマンド \"play\" が見つからないため処理を終了します\n"
-      exit 1
-    end
-  # 指定が間違っている場合
-  else
-    STDERR.print "PLAY_CMD 設定が正しくありません。\"aplay\" または \"sox\" を指定してください\n"
-    exit 1
   end
 end
 
 # mp3フラグが1の場合
 if mp3_flag == 1 then
-  # soxコマンドがあるかチェック
-  num = `which sox | wc -l 2>/dev/null`
-  # soxコマンドが見つかった場合
-  if num.to_i > 0 then
-    conv_command = "sox"
-  # soxコマンドが見つからない場合
-  else
-    # ffmpegコマンドがあるかチェック
-    num = `which ffmpeg | wc -l 2>/dev/null`
-    # ffmpegコマンドが見つかった場合
-    if num.to_i > 0 then
-      conv_command = "ffmpeg"
-    # ffmpegコマンドも見つからない場合
-    else
-      STDERR.print "コマンド \"sox\" か \"ffmpeg\" がともに見つからないため、mp3 での出力はできません\n"
+
+  #　CONV_CMD に値「sox」または「ffmpeg」が設定されていたらその値をセットする
+  if CONV_CMD == "sox" or CONV_CMD == "ffmpeg" then
+    conv_command = CONV_CMD
+    debug_print("#{conv_command}を使用してmp3変換を実行します")
+    # コマンドがあるかチェック
+    num = `which #{conv_command} | wc -l 2>/dev/null`
+    if num.to_i == 0 then
+      STDERR.print "コマンド \"#{conv_command}\" が見つからないため、mp3 での出力はできません\n"
       exit 1
+    end
+  # CONV_CMD の値が空だったり、正しくない場合は使えるコマンドがないか調べる
+  else
+    debug_print("mp3変換コマンドを検索します")
+    # soxコマンドがあるかチェック
+    num = `which sox | wc -l 2>/dev/null`
+    # soxコマンドが見つかった場合
+    if num.to_i > 0 then
+      debug_print("soxコマンドが見つかりました")
+      conv_command = "sox"
+    # soxコマンドが見つからない場合
+    else
+      # ffmpegコマンドがあるかチェック
+      num = `which ffmpeg | wc -l 2>/dev/null`
+      # ffmpegコマンドが見つかった場合
+      if num.to_i > 0 then
+        debug_print("ffmpegコマンドが見つかりました")
+        conv_command = "ffmpeg"
+      # ffmpegコマンドも見つからない場合
+      else
+        STDERR.print "コマンド \"sox\" か \"ffmpeg\" がともに見つからないため、mp3 での出力はできません\n"
+        exit 1
+      end
     end
   end
 
@@ -1623,7 +1666,7 @@ if play_flag == 1 or single_output_flag == 1 or stdout_flag == 1 then
     debug_print("wavデータを再生します")
 
     # 再生
-    play_wav(output_wav, rdp_flag)
+    play_wav(play_command, output_wav, rdp_flag)
 
   # wavで保存する場合
   elsif mp3_flag == 0 then

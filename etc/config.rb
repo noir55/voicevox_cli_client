@@ -113,6 +113,9 @@ SOX_SEQREAD_DEVICE = "hw:0,0"
 
 ## 音声ファイルのmp3化に関する設定
 
+# mp3変換に使用するコマンド (sox,ffmpeg)
+CONV_CMD = "sox"
+
 # soxのmp3変換オプション (-C オプションでビットレート (kbps) と品質 (0-9 小さいほど高品質) を指定)
 SOX_OPT1 = "-C 128.2"
 SOX_OPT2 = "channels 1 rate 44.1k"

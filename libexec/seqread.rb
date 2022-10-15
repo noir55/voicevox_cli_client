@@ -6,6 +6,9 @@ require 'fileutils'
 require 'json'
 require 'optparse'
 
+# バージョン
+VERSION="1.0.1"
+
 
 #------
 # 設定
@@ -62,13 +65,13 @@ end
 
 
 # 音声データを再生するスレッドで実行される処理
-def play_wav(wavdata)
+def play_wav(play_command, wavdata)
   begin
     # aplayコマンドで再生する場合
-    if PLAY_CMD == "aplay" then
+    if play_command == "aplay" then
       play_cmd = "aplay -D #{APLAY_SEQREAD_DEVICE}"
     # sox(play)コマンドで再生する場合
-    elsif PLAY_CMD == "sox" then
+    elsif play_command == "sox" then
       # 環境変数「AUDIODEV」で再生するデバイスを指定
       ENV['AUDIODEV'] = SOX_SEQREAD_DEVICE
       # 再生コマンド
@@ -91,6 +94,7 @@ end
 # オプションの処理
 opt = OptionParser.new
 opt.on('--debug', 'デバッグメッセージを出力します') {|v| @debug_flag = 1 }
+opt.on('--version', 'バージョンを出力します') {|v| print "#{VERSION}\n" ; exit }
 opt.parse!(ARGV)
 
 # データを受け取る用のソケットを作成して待ち受ける
@@ -113,6 +117,49 @@ conv_thread = nil
 
 # 再生スレッド変数の初期化
 play_thread = nil
+
+#　PLAY_CMD に値「aplay」または「sox」が設定されていたらその値をセットする
+if PLAY_CMD == "aplay" or PLAY_CMD == "sox" then
+  play_command = PLAY_CMD
+  debug_print("#{play_command}を使用して再生を実行します")
+  # コマンドがあるかチェック
+  if play_command == "aplay" then
+    num = `which #{play_command} | wc -l 2>/dev/null`
+    if num.to_i == 0 then
+      STDERR.print "音声を再生するためのコマンド \"#{play_command}\" が見つからないため、再生できません\n"
+      exit 1
+    end
+  elsif play_command == "sox" then
+    num = `which play | wc -l 2>/dev/null`
+    if num.to_i == 0 then
+      STDERR.print "音声を再生するためのコマンド \"play(sox)\" が見つからないため、再生できません\n"
+      exit 1
+    end
+  end
+# PLAY_CMD の値が空だったり、正しくない場合は使えるコマンドがないか調べる
+else
+  debug_print("再生コマンドを検索します")
+  # aplayコマンドがあるかチェック
+  num = `which aplay | wc -l 2>/dev/null`
+  # aplayコマンドが見つかった場合
+  if num.to_i > 0 then
+    debug_print("aplayコマンドが見つかりました")
+    play_command = "aplay"
+  # aplayコマンドが見つからない場合
+  else
+    # soxコマンドがあるかチェック
+    num = `which play | wc -l 2>/dev/null`
+    # soxコマンドが見つかった場合
+    if num.to_i > 0 then
+      debug_print("play(sox)コマンドが見つかりました")
+      play_command = "sox"
+    # soxコマンドも見つからない場合
+    else
+      STDERR.print "コマンド \"aplay\" か \"play(sox)\" がともに見つからないため、再生はできません\n"
+      exit 1
+    end
+  end
+end
 
 # 無限ループで繰り返す
 catch :loop do
@@ -166,7 +213,7 @@ catch :loop do
     if play_thread.nil? and voice_array.length > 0 then
       # データを取り出して新たな変換スレッドを実行
       voicedata = voice_array.shift
-      play_thread = Thread.new { play_wav(voicedata) }
+      play_thread = Thread.new { play_wav(play_command, voicedata) }
       # デバッグ用
       debug_print("start new play thread (J=#{json_array.length} V=#{voice_array.length})")
     # 再生スレッドが終了していたら

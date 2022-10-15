@@ -761,7 +761,7 @@ opt.on('-f', '--file TEXT_FILE', 'テキストファイルの内容を音声変�
 opt.on('-o', '--output FILENAME_PREFIX', '出力ファイル名を指定します (拡張子は不要)') {|v| output_filename = v }
 opt.on('-1', '--single', 'テキスト全体を1つのファイルに出力します') {|v| single_output_flag = 1 }
 opt.on('-p', '--play', 'ファイルに出力せず、全ての音声変換後に読み上げを行います') {|v| play_flag = 1 }
-opt.on('-s', '--speaker NUMBER', "声の種類を指定します (0-#{@max_speaker_id})") {|v| speaker = v }
+opt.on('-s', '--speaker NUMBER', "声の種類を指定します (0-#{@max_speaker_id}) または r") {|v| speaker = v }
 opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (0-#{@max_speaker_id}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
 opt.on('--query NUMBER', "クエリ時の声の種類を指定します (0-#{@max_speaker_id})") {|v| query_speaker = v }
 opt.on('-i', '--interval INTERVAL_SECOND', '文章間の時間を指定します (秒)'){|v| interval_time = v.to_f }

@@ -19,7 +19,7 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.2.9"
+VERSION="1.3.0"
 
 
 #------
@@ -75,24 +75,81 @@ def debug_print(message)
 end
 
 
+# 正しい JSON かどうかチェックする関数
+def check_format(json)
+  begin
+    JSON.parse(json)
+    return true
+  rescue JSON::ParserError => e
+    return false
+  end
+end
+
+
+# エンジンで指定可能なSpeakerID一覧を取得する関数
+def get_available_speakerid(server)
+  uri = URI.parse("http://#{server}/speakers")
+  http = Net::HTTP.new(uri.host, uri.port)
+  res = nil
+  # サーバから情報を取得
+  begin
+    Timeout.timeout(5){
+      res = http.get(uri)
+    }
+  rescue Timeout::Error
+    res = nil
+  end
+  # サーバから返ってきたら
+  if not res.nil? then
+    # JSONフォーマットが正しいかチェック
+    if not check_format(res.body) then
+      debug_print("データが正しいJSON形式ではありません\n")
+      return nil
+    end
+    # 利用可能なSpeakerIDを格納する配列
+    speaker_ids = Array.new
+    # JSONをハッシュに変換
+    debug_print("speakers=#{res.body}")
+    speaker_data = JSON.parse(res.body)
+    speaker_data.each{|data|
+      data['styles'].each{|style|
+        speaker_ids << style['id']
+      }
+    }
+    # 指定可能なSpeakerID一覧を配列で返す
+    return speaker_ids.sort
+  # サーバからデータが返ってこなかったら
+  else
+    debug_print("voicevox engineで利用可能なSpeakerIDを取得できません")
+    return nil
+  end
+end
+
 # 文字列をwavデータに変換する関数
-def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
-
-  # speakerの値チェック
-  if speaker.to_i < 0 or @max_speaker_id < speaker.to_i then
-    STDERR.print "speaker の値が正しくありません (\"#{speaker}\")\n"
+def text2wav(type, server, text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume, sample_rate=0)
+  if type == "voicevox" then
+    # speakerの値チェック
+    if speaker.to_i < 0 or @max_speaker_id < speaker.to_i then
+      STDERR.print "speaker の値が正しくありません (\"#{speaker}\")\n"
+    end
+    # query_speakerの値チェック
+    if query_speaker != "" and ( query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i ) then
+      STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
+    end
+  elsif type == "coeiroink" then
+    # speakerの値チェック
+    if not @coeiroink_available_speakers.include?(speaker) then
+      STDERR.print "speaker の値が正しくありません (\"#{speaker}\")\n"
+    end
+    # query_speakerの値チェック
+    if query_speaker != "" and (not @coeiroink_available_speakers.include?(query_speaker)) then
+      STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
+    end
   end
-
-  # query_speakerの値チェック
-  if query_speaker != "" and ( query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i ) then
-    STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
-  end
-
   # URLエンコード
   enc_text = CGI.escape(text)
   # デバッグメッセージ
   debug_print("enc_text=#{enc_text}")
-
   if query_speaker == "" then
     # デバッグメッセージ
     debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker}\"")
@@ -104,27 +161,39 @@ def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, par
     # JSON取得のためのURLをセット
     uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}")
   end
-
   # JSONの取得
   res = Net::HTTP.post_form(uri, 'body' => nil)
   # デバッグメッセージ
   debug_print("res=#{res.body}")
-
   # JSON取得に成功したら、音声データ変換を実行
   if res.code == "200" then
-
-    # 話速補正
-    param_speed = sprintf("%0.2f", param_speed.to_f * CORRECT_MATRIX[speaker.to_i][0] )
-
-    # ピッチ補正
-    param_pitch = sprintf("%0.2f", param_pitch.to_f + CORRECT_MATRIX[speaker.to_i][1] )
-
-    # イントネーション補正
-    param_intonation = sprintf("%0.2f", param_intonation.to_f * CORRECT_MATRIX[speaker.to_i][2] )
-
-    # 音量補正
-    param_volume = sprintf("%0.2f", param_volume.to_f * CORRECT_MATRIX[speaker.to_i][3] )
-
+    # VOICEVOXの場合の補正
+    if type == "voicevox" then
+      # 設定ファイルで補正設定があれば
+      if VOICEVOX_CORRECT_MATRIX.key?(speaker.to_s) then
+        # 話速補正
+        param_speed = sprintf("%0.2f", param_speed.to_f * VOICEVOX_CORRECT_MATRIX[speaker.to_s][0] )
+        # ピッチ補正
+        param_pitch = sprintf("%0.2f", param_pitch.to_f + VOICEVOX_CORRECT_MATRIX[speaker.to_s][1] )
+        # イントネーション補正
+        param_intonation = sprintf("%0.2f", param_intonation.to_f * VOICEVOX_CORRECT_MATRIX[speaker.to_s][2] )
+        # 音量補正
+        param_volume = sprintf("%0.2f", param_volume.to_f * VOICEVOX_CORRECT_MATRIX[speaker.to_s][3] )
+      end
+    # COEIROINKの場合の補正
+    elsif type == "coeiroink" then
+      # 設定ファイルで補正設定があれば
+      if COEIROINK_CORRECT_MATRIX.key?(speaker.to_s) then
+        # 話速補正
+        param_speed = sprintf("%0.2f", param_speed.to_f * COEIROINK_CORRECT_MATRIX[speaker.to_s][0] )
+        # ピッチ補正
+        param_pitch = sprintf("%0.2f", param_pitch.to_f + COEIROINK_CORRECT_MATRIX[speaker.to_s][1] )
+        # イントネーション補正
+        param_intonation = sprintf("%0.2f", param_intonation.to_f * COEIROINK_CORRECT_MATRIX[speaker.to_s][2] )
+        # 音量補正
+        param_volume = sprintf("%0.2f", param_volume.to_f * COEIROINK_CORRECT_MATRIX[speaker.to_s][3] )
+      end
+    end
     # 各種パラメータがデフォルト値でない場合、値をセットする
     if param_speed != 1.0 or param_pitch != 0.0 or param_intonation != 1.0 or param_volume != 1.0 then
       # 各種パラメータをセット
@@ -135,7 +204,12 @@ def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, par
       json_hash["volumeScale"] = param_volume
       res.body = JSON.generate(json_hash)
     end
-
+    # サンプルレートが引数で指定された場合セットする
+    if sample_rate != 0 then
+      json_hash = JSON.parse(res.body)
+      json_hash["outputSamplingRate"] = sample_rate
+      res.body = JSON.generate(json_hash)
+    end
     # デバッグメッセージ
     debug_print("modified res=#{res.body}")
     # JSONを音声データに変換
@@ -147,10 +221,8 @@ def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, par
     debug_print("URI=\"http://#{server}/synthesis?speaker=#{speaker}\"")
     # 音声データを取得
     voice = http.post("/synthesis?speaker=#{speaker}", res.body, headers)
-
     # デバッグメッセージ
     debug_print("リターンコード=#{voice.code} データサイズ=#{voice.body.size}")
-
     # 音声データ変換に成功したら
     if voice.code == "200" then
       # 音声データを返す
@@ -163,39 +235,47 @@ def text2wav(server, text, speaker, query_speaker, param_speed, param_pitch, par
       STDERR.print "音声データ変換に失敗しました (ret=#{voice.code})\n"
       return nil
     end
-
   # JSON取得に失敗したら
   else
     STDERR.print "クエリ作成に失敗しました (ret=#{res.code})\n"
     return nil
   end
-
 end
 
 
 # 文字列を2者の音声をモーフィングしたwavデータに変換する関数
-def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
-
-  # base_speakerの値チェック
-  if base_speaker.to_i < 0 or @max_speaker_id < base_speaker.to_i then
-    STDERR.print "base_speaker の値が正しくありません (\"#{base_speaker}\")\n"
+def text2wav_morph(type, server, text, base_speaker, target_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, sample_rate=0)
+  if type == "voicevox" then
+    # base_speakerの値チェック
+    if base_speaker.to_i < 0 or @max_speaker_id < base_speaker.to_i then
+      STDERR.print "base_speaker の値が正しくありません (\"#{base_speaker}\")\n"
+    end
+    # target_speakerの値チェック
+    if target_speaker.to_i < 0 or @max_speaker_id < target_speaker.to_i then
+      STDERR.print "target_speaker の値が正しくありません (\"#{target_speaker}\")\n"
+    end
+    # query_speakerの値チェック
+    if query_speaker != "" and ( query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i ) then
+      STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
+    end
+  elsif type == "coeiroink" then
+    # base_speakerの値チェック
+    if not @coeiroink_available_speakers.include?(base_speaker) then
+      STDERR.print "base_speaker の値が正しくありません (\"#{base_speaker}\")\n"
+    end
+    # target_speakerの値チェック
+    if not @coeiroink_available_speakers.include?(target_speaker) then
+      STDERR.print "target_speaker の値が正しくありません (\"#{target_speaker}\")\n"
+    end
+    # query_speakerの値チェック
+    if query_speaker != "" and (not @coeiroink_available_speakers.include?(query_speaker)) then
+      STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
+    end
   end
-
-  # target_speakerの値チェック
-  if target_speaker.to_i < 0 or @max_speaker_id < target_speaker.to_i then
-    STDERR.print "target_speaker の値が正しくありません (\"#{target_speaker}\")\n"
-  end
-
-  # query_speakerの値チェック
-  if query_speaker != "" and ( query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i ) then
-    STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
-  end
-
   # URLエンコード
   enc_text = CGI.escape(text)
   # デバッグメッセージ
   debug_print("enc_text=#{enc_text}")
-
   if query_speaker == "" then
     # デバッグメッセージ
     debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker}\"")
@@ -207,27 +287,39 @@ def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query
     # JSON取得のためのURLをセット
     uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}")
   end
-
   # JSONの取得
   res = Net::HTTP.post_form(uri, 'body' => nil)
   # デバッグメッセージ
   debug_print("res=#{res.body}")
-
   # JSON取得に成功したら、音声データ変換を実行
   if res.code == "200" then
-
-    # 話速補正
-    param_speed = sprintf("%0.2f", param_speed.to_f * ( (CORRECT_MATRIX[base_speaker.to_i][0] * (1.0 - morph_rate.to_f)) + (CORRECT_MATRIX[target_speaker.to_i][0] * morph_rate.to_f) ) )
-
-    # ピッチ補正
-    param_pitch = sprintf("%0.2f", param_pitch.to_f + ( (CORRECT_MATRIX[base_speaker.to_i][1] * (1.0 - morph_rate.to_f)) + (CORRECT_MATRIX[target_speaker.to_i][1] * morph_rate.to_f) ) )
-
-    # イントネーション補正
-    param_intonation = sprintf("%0.2f", param_intonation.to_f * ( (CORRECT_MATRIX[base_speaker.to_i][2] * (1.0 - morph_rate.to_f)) + (CORRECT_MATRIX[target_speaker.to_i][2] * morph_rate.to_f) ) )
-
-    # 音声補正
-    param_volume = sprintf("%0.2f", param_volume.to_f * ( (CORRECT_MATRIX[base_speaker.to_i][3] * (1.0 - morph_rate.to_f)) + (CORRECT_MATRIX[target_speaker.to_i][3] * morph_rate.to_f) ) )
-
+    # VOICEVOXの場合の補正
+    if type == "voicevox" then
+      # 設定ファイルで補正設定があれば
+      if VOICEVOX_CORRECT_MATRIX.key?(base_speaker.to_s) and VOICEVOX_CORRECT_MATRIX.key?(target_speaker.to_s) then
+        # 話速補正
+        param_speed = sprintf("%0.2f", param_speed.to_f * ( (VOICEVOX_CORRECT_MATRIX[base_speaker.to_s][0] * (1.0 - morph_rate.to_f)) + (VOICEVOX_CORRECT_MATRIX[target_speaker.to_s][0] * morph_rate.to_f) ) )
+        # ピッチ補正
+        param_pitch = sprintf("%0.2f", param_pitch.to_f + ( (VOICEVOX_CORRECT_MATRIX[base_speaker.to_s][1] * (1.0 - morph_rate.to_f)) + (VOICEVOX_CORRECT_MATRIX[target_speaker.to_s][1] * morph_rate.to_f) ) )
+        # イントネーション補正
+        param_intonation = sprintf("%0.2f", param_intonation.to_f * ( (VOICEVOX_CORRECT_MATRIX[base_speaker.to_s][2] * (1.0 - morph_rate.to_f)) + (VOICEVOX_CORRECT_MATRIX[target_speaker.to_s][2] * morph_rate.to_f) ) )
+        # 音声補正
+        param_volume = sprintf("%0.2f", param_volume.to_f * ( (VOICEVOX_CORRECT_MATRIX[base_speaker.to_s][3] * (1.0 - morph_rate.to_f)) + (VOICEVOX_CORRECT_MATRIX[target_speaker.to_s][3] * morph_rate.to_f) ) )
+      end
+    # COEIROINKの場合の補正
+    elsif type == "coeiroink" then
+      # 設定ファイルで補正設定があれば
+      if COEIROINK_CORRECT_MATRIX.key?(base_speaker.to_s) and COEIROINK_CORRECT_MATRIX.key?(target_speaker.to_s) then
+        # 話速補正
+        param_speed = sprintf("%0.2f", param_speed.to_f * ( (COEIROINK_CORRECT_MATRIX[base_speaker.to_s][0] * (1.0 - morph_rate.to_f)) + (COEIROINK_CORRECT_MATRIX[target_speaker.to_s][0] * morph_rate.to_f) ) )
+        # ピッチ補正
+        param_pitch = sprintf("%0.2f", param_pitch.to_f + ( (COEIROINK_CORRECT_MATRIX[base_speaker.to_s][1] * (1.0 - morph_rate.to_f)) + (COEIROINK_CORRECT_MATRIX[target_speaker.to_s][1] * morph_rate.to_f) ) )
+        # イントネーション補正
+        param_intonation = sprintf("%0.2f", param_intonation.to_f * ( (COEIROINK_CORRECT_MATRIX[base_speaker.to_s][2] * (1.0 - morph_rate.to_f)) + (COEIROINK_CORRECT_MATRIX[target_speaker.to_s][2] * morph_rate.to_f) ) )
+        # 音声補正
+        param_volume = sprintf("%0.2f", param_volume.to_f * ( (COEIROINK_CORRECT_MATRIX[base_speaker.to_s][3] * (1.0 - morph_rate.to_f)) + (COEIROINK_CORRECT_MATRIX[target_speaker.to_s][3] * morph_rate.to_f) ) )
+      end
+    end
     # 各種パラメータがデフォルト値でない場合、値をセットする
     if param_speed != 1.0 or param_pitch != 0.0 or param_intonation != 1.0 or param_volume != 1.0 then
       # 各種パラメータをセット
@@ -238,7 +330,12 @@ def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query
       json_hash["volumeScale"] = param_volume
       res.body = JSON.generate(json_hash)
     end
-
+    # サンプルレートが引数で指定された場合セットする
+    if sample_rate != 0 then
+      json_hash = JSON.parse(res.body)
+      json_hash["outputSamplingRate"] = sample_rate
+      res.body = JSON.generate(json_hash)
+    end
     # デバッグメッセージ
     debug_print("modified res=#{res.body}")
     # JSONを音声データに変換
@@ -250,10 +347,8 @@ def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query
     debug_print("URI=\"http://#{server}//synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}\"")
     # 音声データを取得
     voice = http.post("/synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}", res.body, headers)
-
     # デバッグメッセージ
     debug_print("リターンコード=#{voice.code} データサイズ=#{voice.body.size}")
-
     # 音声データ変換に成功したら
     if voice.code == "200" then
       # 音声データを返す
@@ -266,42 +361,33 @@ def text2wav_morph(server, text, base_speaker, target_speaker, morph_rate, query
       STDERR.print "音声データ変換に失敗しました (ret=#{voice.code})\n"
       return nil
     end
-
   # JSON取得に失敗したら
   else
     STDERR.print "クエリ作成に失敗しました (ret=#{res.code})\n"
     return nil
   end
-
 end
 
 
 # 置換リストを読み込む関数
 def load_replace_list(replace_list_file_path)
-
   # 置換前文字列と置換後対応を格納するハッシュ
   repl_hash = Hash.new
-
   # dict.datファイルがあれば読み込む
   if File.exist?(replace_list_file_path) then
-
     # １行づつ処理
     File.open(replace_list_file_path){|f|
       f.each_line{|line|
-
         # 行頭が「#」以外の行を置換リストとして読み込む
         if line !~ /^#/ then
-
           # タブ区切りで、タブ前を文字列、タブ後ろを読みとしてハッシュに格納
           if line =~ /^(.+)\t(.+)$/ then
             repl_hash[$1] = $2
           end
-
         end
       }
     }
   end
-
   # ハッシュを返す
   return repl_hash
 end
@@ -309,12 +395,9 @@ end
 
 # 音声データを再生する関数
 def play_wav(play_command, wavdata, rdp_flag)
-
   debug_print("再生します (datasize=#{wavdata.size})")
-
   # aplayコマンドで再生する場合
   if play_command == "aplay" then
-
     # オプションで「--rdp」が指定されている場合
     if rdp_flag == 1 then
       play_cmd = "aplay -D pulse"
@@ -331,10 +414,8 @@ def play_wav(play_command, wavdata, rdp_flag)
         play_cmd = "aplay -D pulse"
       end
     end
-
   # sox(play)コマンドで再生する場合
   elsif play_command == "sox" then
-
     # オプションで「--no-rdp」が指定されている場合
     if rdp_flag == 2 then
       # 環境変数「AUDIODEV」で再生するデバイスを指定
@@ -346,26 +427,21 @@ def play_wav(play_command, wavdata, rdp_flag)
         ENV['AUDIODEV'] = SOX_VVTTS_DEVICE
       end
     end
-
     # 再生コマンド
     play_cmd = "play -"
-
   # 再生コマンドの指定が「aplay」「sox」でもない場合はエラーとする
   else
     STDERR.print "再生コマンドの指定が正しくありません\n"
     exit 1
   end
-
   # 再生コマンドにパイプで音声データを渡して実行
   debug_print("再生コマンド \"#{play_cmd}\"")
   Open3.capture3(play_cmd, :stdin_data=>wavdata)
-
 end
 
 
 # 指定されたサンプリング周波数、時間(秒)の無音データを作成する関数
 def silent_wav_data(sample_rate, silent_time)
-
   # データを格納する変数
   zero_data = Array.new
   # データの個数を求める
@@ -378,51 +454,42 @@ def silent_wav_data(sample_rate, silent_time)
   silent_data = zero_data.pack('s*')
   # バイナリデータを返す
   return silent_data
-
 end
 
 
 # wavデータの配列を結合して1つのwavデータに変換する関数
-def unite_wav(wavs,interval_time,first_silent_time,last_silent_time)
-
+def unite_wav(wavs,interval_time,first_silent_time,last_silent_time,sample_rate)
   # デバッグメッセージ
   debug_print("#{wavs.length} つの WAV データを #{interval_time} 秒間隔で結合します")
-
   # 出力データとサイズを格納する変数
   output_wav = Array.new
   output_wav_size = 0
-
   # 先頭の無音時間が指定されていたらセットする
   if first_silent_time.to_f > 0.0 then
     # 無音データの作成
-    first_silent = silent_wav_data(24000, first_silent_time.to_f)
+    first_silent = silent_wav_data(sample_rate, first_silent_time.to_f)
     # デバッグメッセージ
     debug_print("first_silent.size=#{first_silent.size}")
     # 無音データを先頭にセット
     output_wav << first_silent
     output_wav_size += first_silent.size
   end
-
   # 間に挟む無音時間が0.0秒より大きい場合
   if interval_time.to_f > 0.0 then
     # 無音データの作成
-    silent_interval = silent_wav_data(24000, interval_time.to_f)
+    silent_interval = silent_wav_data(sample_rate, interval_time.to_f)
     # デバッグメッセージ
     debug_print("silent_interval.size=#{silent_interval.size}")
   end
-
   # 与えられたWAVデータの配列を順に処理
   wavs.each {|data|
-
     # ヘッダ情報(12バイト)
     #header = data.slice(0,12)
     #riff = header.slice(0,4)
     #data_size = header.slice(4,4).unpack('V')[0].to_i
     #wave = header.slice(8,4)
-
     # デバッグメッセージ
     #debug_print("riff=#{riff} data_size=#{data_size} wave=#{wave}")
-
     # fmt チャンクの読み出し(普通は8バイト+データ16バイト)
     chunk = data.slice(12,8)
     chunk_name = chunk.slice(0,4)
@@ -434,96 +501,73 @@ def unite_wav(wavs,interval_time,first_silent_time,last_silent_time)
     format_bytePerSec = chunk_data.slice(8,4).unpack('V').join.to_i
     format_blockSize = chunk_data.slice(12,2).unpack('c')[0]
     format_bitPerSample = chunk_data.slice(14,2).unpack('c')[0]
-
     # fmt チャンクは結合後も変わらないため、使いまわす用に丸ごとグローバル変数に保存しておく
     @fmt_chunk = data.slice(12, chunk_size+8)
-
     # デバッグメッセージ
     debug_print("name=#{chunk_name} size=#{chunk_size}\nid=#{format_id} channel=#{format_channel} hz=#{format_hz} bytePerSec=#{format_bytePerSec} blockSize=#{format_blockSize} bitPerSample=#{format_bitPerSample}")
-
     # data チャンクの読み出し位置(dataチャンクに音声データが入っている)
     chunk_start = 20 + chunk_size.to_i
-
     # data チャンクの読み出し
     chunk2 = data.slice(chunk_start,8)
     chunk_name2 = chunk2.slice(0,4)
     chunk_size2 = chunk2.slice(4,4).unpack("V")[0].to_i
     chunk_data2 = data.slice(chunk_start+8,chunk_size2)
-
     # デバッグメッセージ
     debug_print("name2=#{chunk_name2} size2=#{chunk_size2}")
-
     # 先頭以外の場合、間の無音データを挿入
     if output_wav.length > 0 and interval_time > 0.0 then
       output_wav << silent_interval
       output_wav_size += silent_interval.size
     end
-
     # 音声データを追加
     output_wav << chunk_data2
-
     # 音声データサイズを足す
     output_wav_size += chunk_size2.to_i
-
     # デバッグメッセージ
     debug_print("output_wav_size=#{output_wav_size}")
   }
-
   # 最後の無音時間が指定されていたらセットする
   if last_silent_time.to_f > 0.0 then
     # 無音データの作成
-    last_silent = silent_wav_data(24000, last_silent_time.to_f)
+    last_silent = silent_wav_data(sample_rate, last_silent_time.to_f)
     # デバッグメッセージ
     debug_print("last_silent.size=#{last_silent.size}")
     # 無音データを最後に追加
     output_wav << last_silent
     output_wav_size += last_silent.size
   end
-
   # 出力データの作成
-
   # サイズ計算
   header_file_size = 4
   # fmt チャンクサイズを追加
   header_file_size += 8 + 16
   # data チャンクサイズを追加
   header_file_size += 8 + output_wav_size
-
   # ヘッダ、fmtチャンク、dataチャンクを結合
   outdata = 'RIFF' + [header_file_size].pack('V') + 'WAVE'
   outdata += @fmt_chunk
   outdata += 'data' + [output_wav_size].pack('V') + output_wav.join
-
   return outdata
-
 end
 
 
 # wavファイルをmp3ファイルにコンバートする関数
 def conv2mp3(conv_command, input_wav_file, output_mp3_file)
-
   # 変換コマンドがsoxだったら
   if conv_command == "sox" then
-
     # soxコマンドを使用して変換する
     debug_print("mp3変換コマンド \"sox #{input_wav_file}.wav #{SOX_OPT1} #{output_mp3_file}.mp3 #{SOX_OPT2}\"")
     system("sox #{input_wav_file}.wav #{SOX_OPT1} #{output_mp3_file}.mp3 #{SOX_OPT2} >/dev/null 2>&1")
-
   # 変換コマンドがffmpegだったら
   elsif conv_command == "ffmpeg" then
-
     # ffmpegコマンドを使用して変換する
     debug_print("mp3変換コマンド \"ffmpeg -i #{input_wav_file}.wav #{FFMPEG_OPT} #{output_mp3_file}.mp3\"")
     system("ffmpeg -i #{input_wav_file}.wav #{FFMPEG_OPT} #{output_mp3_file}.mp3 >/dev/null 2>&1")
-
   # 変換コマンドがそれ以外だったら
   else
-
     STDERR.print "mp3変換コマンドとして\"#{conv_command}\"は利用できません\n"
     exit 1
-
   end
-
   # 変換が成功したら
   if $?.exitstatus == 0 then
     # wavファイルを削除
@@ -533,27 +577,20 @@ def conv2mp3(conv_command, input_wav_file, output_mp3_file)
     STDERR.print "\"#{input_wav_file}.wav\" から \"#{output_mp3_file}.mp3\" への変換に失敗しました\n"
     return 1
   end
-
 end
 
 
 # スレッドで実行する処理
-def thread_proc( server, text, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag )
-
+def thread_proc(type, server, text, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, sample_rate )
   # テキストはコピーしてから処理(スレッド失敗時に元のテキストで処理したいため)
   proc_text = text.clone
-
   begin
-
     # 文頭の「#{s1,q8}」のような記述から声の種類のパラメータを変更
     if proc_text =~ /^ *#\{ *([a-zA-Z0-9,\-\. ]+) *\} */ then
-
       speaker_element = Array.new
       speaker_element = $1.split(",")
-
       # マッチングした記述を順に処理
       speaker_element.each {|temp|
-
         # もし、「s<数字>」だったら声の種類を変更
         if temp =~ /^ *s([0-9]+) *$/ then
           speaker = $1.to_i
@@ -601,43 +638,31 @@ def thread_proc( server, text, speaker, morph_speaker, morph_rate, query_speaker
         elsif temp =~ /^ *V[xX] *$/ then
           param_volume = 1.0
         end
-
       }
-
       # 設定部分を削除
       proc_text.sub!(/^ *#\{ *([a-zA-Z0-9,\-\. ]+) *\} */, '')
-
     end
-
     # 改行を削除
     proc_text.chomp!
-
     # スペース、タブ以外の文字があればwavデータに変換する
     if proc_text != /^ *$/ then
-
       # 詳細メッセージ
       if verbous_flag == 1 then
         STDERR.print("        conv_text=\"#{proc_text}\" srv=\"#{server}\"\n")
       end
-
       # モーフィングする場合
       if morph_speaker != "" and morph_rate != "" then
-        wavdata = text2wav_morph(server, proc_text, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
+        wavdata = text2wav_morph(type, server, proc_text, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, sample_rate)
       # モーフィングしない場合
       else
-        wavdata = text2wav(server, proc_text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume)
+        wavdata = text2wav(type, server, proc_text, speaker, query_speaker, param_speed, param_pitch, param_intonation, param_volume, sample_rate)
       end
-
     end
-
     return wavdata
-
   rescue => e
-
     # エラーが発生したら nil を返す
     STDERR.print "サーバとの通信でエラーが発生しました (e=\"#{e.message}\")\n"
     return nil
-
   end
 end
 
@@ -648,6 +673,9 @@ end
 
 # デバッグフラグを初期化
 @debug_flag = 0
+
+# サーバのタイプを格納する変数
+server_type = ""
 
 # 声の種類のデフォルト値をセット
 speaker = SPEAKER
@@ -676,6 +704,10 @@ param_speed = 1.0
 param_pitch = 0.0
 param_intonation = 1.0
 param_volume = 1.0
+
+# 出力する音声ファイルのサンプルレート
+voicevox_sample_rate = 24000
+coeiroink_sample_rate = 44100
 
 # 入力ファイルを格納する変数
 message_file = ""
@@ -713,47 +745,12 @@ output_filename = ""
 # 1つのファイルに出力させるフラグを初期化
 single_output_flag = 0
 
-# 指定できるSpeakerIDの最大値
+# VOICEVOXで指定できるSpeakerIDの最大値
 @max_speaker_id = 0
 
-# 最初のVOICEVOX ENGINEからバージョン番号を取得
-uri = URI.parse("http://#{VOICEVOX_ENGINE[0]}/version")
-http = Net::HTTP.new(uri.host, uri.port)
-res = nil
-begin
-  Timeout.timeout(5){
-    res = http.get(uri)
-  }
-rescue Timeout::Error
-  res = nil
-end
-if (not res.nil?) and res.body =~ /^\"([0-9]+)\.([0-9]+)\.([0-9]+)\"$/ then
-  maj_version = $1.to_i
-  min_version = $2.to_i
-  revision = $3.to_i
-else
-  STDERR.print "voicevox engineのバージョン番号を取得できません\n"
-  exit 1
-end
+# COEIROINKで指定できるSpeakerIDの一覧を格納する配列
+@coeiroink_available_speakers = Array.new
 
-# VOICEVOX ENGINEのバージョンからSpeakerIDの最大値を求める
-VERSION_TO_MAX_SPEAKER_ID.each{|version,maxspeakerid|
-  if version =~ /^([0-9]+)\.([0-9]+)\.([0-9]+)$/ then
-    maj = $1.to_i
-    min = $2.to_i
-    rev = $3.to_i
-    if maj_version >= maj and min_version >= min and revision >= rev then
-      @max_speaker_id = VERSION_TO_MAX_SPEAKER_ID[version]
-    end
-  else
-    STDERR.print "VERSION_TO_MAX_SPEAKER_IDのバージョン指定が正しくありません\n"
-    exit 1
-  end
-}
-if @max_speaker_id == 0 then
-  STDERR.print "指定可能なSperkerIDの最大値が不明です\n"
-  exit 1
-end
 
 # オプションで指定されていたら上書き
 opt = OptionParser.new
@@ -761,9 +758,9 @@ opt.on('-f', '--file TEXT_FILE', 'テキストファイルの内容を音声変�
 opt.on('-o', '--output FILENAME_PREFIX', '出力ファイル名を指定します (拡張子は不要)') {|v| output_filename = v }
 opt.on('-1', '--single', 'テキスト全体を1つのファイルに出力します') {|v| single_output_flag = 1 }
 opt.on('-p', '--play', 'ファイルに出力せず、全ての音声変換後に読み上げを行います') {|v| play_flag = 1 }
-opt.on('-s', '--speaker NUMBER', "声の種類を指定します (0-#{@max_speaker_id}) または r") {|v| speaker = v }
-opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (0-#{@max_speaker_id}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
-opt.on('--query NUMBER', "クエリ時の声の種類を指定します (0-#{@max_speaker_id})") {|v| query_speaker = v }
+opt.on('-s', '--speaker NUMBER', "声の種類を指定します (<数字>、c<数字> または r") {|v| speaker = v }
+opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (<数字> または c<数字>}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
+opt.on('--query NUMBER', "クエリ時の声の種類を指定します (<数字> または c<数字>)") {|v| query_speaker = v }
 opt.on('-i', '--interval INTERVAL_SECOND', '文章間の時間を指定します (秒)'){|v| interval_time = v.to_f }
 opt.on('-I', '--paragraph-interval INTERVAL_SECOND', '文節間の時間を指定します (秒)'){|v| paragraph_interval_time = v.to_f }
 opt.on('-q', '--quiet', '標準出力に何も表示しません') {|v| quiet_flag = 1 }
@@ -795,49 +792,198 @@ debug_print("mp3_flag=#{mp3_flag}")
 debug_print("quiet_flag=#{quiet_flag}")
 debug_print("output_filename=#{output_filename}")
 
-# VOICEVOX Engineをチェックするフラグが1だったら
-if check_flag == 1 then
-  debug_print("エンジンの状態をチェックします")
-  VOICEVOX_ENGINE.each{|server|
-    uri = URI.parse("http://#{server}/version")
-    http = Net::HTTP.new(uri.host, uri.port)
+# ランダム声種が指定されたときの選択配列をコピー
+random_speaker_id = RANDOM_SPEAKER.dup
+
+# 設定ファイルでVOICEVOX ENGINEの指定があれば
+if (not VOICEVOX_ENGINE.nil?) and VOICEVOX_ENGINE.length > 0 then
+  # 最初のVOICEVOX ENGINEからバージョン番号を取得
+  uri = URI.parse("http://#{VOICEVOX_ENGINE[0]}/version")
+  http = Net::HTTP.new(uri.host, uri.port)
+  res = nil
+  begin
+    Timeout.timeout(5){
+      res = http.get(uri)
+    }
+  rescue Timeout::Error
     res = nil
-    begin
-      Timeout.timeout(5){
-        res = http.get(uri)
-      }
-    rescue Timeout::Error
-      res = nil
-    end
-    if (not res.nil?) and res.body =~ /^\"[0-9]+\.[0-9]+\.[0-9]+\"$/ then
-      print "voicevox engine=#{server} version=#{res.body.chomp} max_speaker_id=#{@max_speaker_id} status=OK\n"
+  end
+  if (not res.nil?) and res.body =~ /^\"([0-9]+)\.([0-9]+)\.([0-9]+)\"$/ then
+    maj_version = $1.to_i
+    min_version = $2.to_i
+    revision = $3.to_i
+  else
+    STDERR.print "voicevox engineのバージョン番号を取得できません\n"
+    exit 1
+  end
+
+  # VOICEVOX ENGINEのバージョンからSpeakerIDの最大値を求める
+  VERSION_TO_MAX_SPEAKER_ID.each{|version,maxspeakerid|
+    if version =~ /^([0-9]+)\.([0-9]+)\.([0-9]+)$/ then
+      maj = $1.to_i
+      min = $2.to_i
+      rev = $3.to_i
+      if maj_version >= maj and min_version >= min and revision >= rev then
+        @max_speaker_id = VERSION_TO_MAX_SPEAKER_ID[version]
+      end
     else
-      print "voicevox engine=#{server} status=NG\n"
+      STDERR.print "VERSION_TO_MAX_SPEAKER_IDのバージョン指定が正しくありません\n"
+      exit 1
     end
   }
+  if @max_speaker_id == 0 then
+    STDERR.print "指定可能なSperkerIDの最大値が不明です\n"
+    exit 1
+  end
+  # random_speaker_idから、SpeakerIDの最大値より大きな値を削除
+  temp_array = Array.new
+  random_speaker_id.each{|value|
+    if value =~ /^[0-9]+$/ and value.to_i > @max_speaker_id then
+      debug_print("VOICEVOXサーバで SpeakerID \"#{value}\" は指定できないためRANDOM_SPEAKERから削除します")
+      temp_array << value
+    end
+  }
+  random_speaker_id = random_speaker_id - temp_array
+# 設定ファイルでVOICEVOX ENGINEの指定がなければ、ランダム選択の声種からVOICEVOXのものをすべて取り除く
+else
+  temp_array = Array.new
+  random_speaker_id.each{|value|
+    if value =~ /^[0-9]+$/ then
+      temp_array << value
+    end
+  }
+  random_speaker_id = random_speaker_id - temp_array
+  debug_print("RANDAM_SPEAKERからVOICEVOXの声種を削除しました (RANDOM_SPEAKER=#{random_speaker_id})")
+end
+
+# 設定ファイルでCOEIROINK ENGINEの指定があれば、指定可能なSpeakerID一覧を求める
+if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then
+  @coeiroink_available_speakers = get_available_speakerid(COEIROINK_ENGINE[0])
+  if @coeiroink_available_speakers.nil? then
+    STDERR.print "COEIROINKサーバから、指定可能なSpeakerID一覧が取得できません\n"
+    exit 1
+  end
+  # random_speaker_idから、COEIROINKサーバで指定できない値を削除
+  temp_array = Array.new
+  random_speaker_id.each{|value|
+    if value =~ /^c([0-9]+)$/ then
+      if not @coeiroink_available_speakers.include?($1.to_i) then
+        debug_print("COEIROINKサーバで SpeakerID \"#{$1}\" は指定できないためRANDOM_SPEAKERから削除します")
+        temp_array << value
+      end
+    end
+  }
+  random_speaker_id = random_speaker_id - temp_array
+# 設定ファイルでCOEIROINK ENGINEの指定がなければ、ランダム選択の声種からCOEIROINKのものを取り除く
+else
+  temp_array = Array.new
+  random_speaker_id.each{|value|
+    if value =~ /^c[0-9]+$/ then
+      temp_array << value
+    end
+  }
+  random_speaker_id = random_speaker_id - temp_array
+  debug_print("RANDAM_SPEAKERからCOEIROINKの声種を削除しました (RANDOM_SPEAKER=#{random_speaker_id})")
+end
+
+# ENGINEをチェックするフラグが1だったら
+if check_flag == 1 then
+  debug_print("エンジンの状態をチェックします")
+  # VOICEVOX ENGINEの指定があれば
+  if (not VOICEVOX_ENGINE.nil?) and VOICEVOX_ENGINE.length > 0 then
+    VOICEVOX_ENGINE.each{|server|
+      uri = URI.parse("http://#{server}/version")
+      http = Net::HTTP.new(uri.host, uri.port)
+      res = nil
+      begin
+        Timeout.timeout(5){
+          res = http.get(uri)
+        }
+      rescue Timeout::Error
+        res = nil
+      end
+      if (not res.nil?) and res.body =~ /^\"[0-9]+\.[0-9]+\.[0-9]+\"$/ then
+        print "voicevox engine=#{server} version=#{res.body.chomp} max_speaker_id=#{@max_speaker_id} status=OK\n"
+      else
+        print "voicevox engine=#{server} status=NG\n"
+      end
+    }
+  end
+  # COEIROINK ENGINEの指定があれば、指定可能なSpeakerID一覧を求める
+  if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then 
+    COEIROINK_ENGINE.each{|server|
+      uri = URI.parse("http://#{server}/version")
+      http = Net::HTTP.new(uri.host, uri.port)
+      res = nil
+      begin
+        Timeout.timeout(5){
+          res = http.get(uri)
+        }
+      rescue Timeout::Error
+        res = nil
+      end
+      @coeiroink_available_speakers = get_available_speakerid(COEIROINK_ENGINE[0])
+      debug_print("server=#{server} coeiroink_available_speakers=#{@coeiroink_available_speakers}")
+      if (not res.nil?) then
+        print "coeiroink engine=#{server} version=#{res.body.chomp} enable_speaker_id=#{@coeiroink_available_speakers} status=OK\n"
+      else
+        print "coeiroink engine=#{server} status=NG\n"
+      end
+    }
+  end
   exit
 end
 
 # speaker の値チェック
 debug_print("speaker=#{speaker}")
-if not speaker =~ /^([0-9]+|[Rr])$/ then
-  STDERR.print "\"-s (--speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数、または r を指定してください\n"
-  exit 1
+# VOICEVOXのSpeakerIDが指定された場合
+if speaker =~ /^([0-9]+)/ then
+  server_type = "voicevox"
+  speaker = $1.to_i
+  # VOICEVOXサーバで使用できないSpeakerIDの場合
+  if @max_speaker_id < speaker then
+    STDERR.print "VOICEVOX の -s (--speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数を指定してください\n"
+    exit 1
+  end
+# COEIROINKのSpeakerIDが指定された場合
+elsif speaker =~ /^c([0-9]+)/ then
+  server_type = "coeiroink"
+  speaker = $1.to_i
+  # COEIROINKサーバで使用できないSpeakerIDの場合
+  if not @coeiroink_available_speakers.include?(speaker) then
+    STDERR.print "-s (--speaker)\" の値は、COEIROINKサーバで使用できません\n"
+    exit 1
+  end
+# ランダムが指定された場合
 elsif speaker =~ /^[Rr]$/ then
-  # 配列RANDOM_SPEAKERから選ばれた値が@max_speaker_id以下になるまで繰り返す
+  # 配列random_speaker_idから選ばれた値が@max_speaker_id以下になるまで繰り返す
   counter=0
   while true do
-    speaker = RANDOM_SPEAKER.sample
-    if speaker <= @max_speaker_id then
-      break
+    # ランダムな値を選択
+    speaker = random_speaker_id.sample
+    # VOICEVOXのSpeakerIDが指定された場合
+    if speaker =~ /^([0-9]+)$/ then
+      speaker = $1.to_i
+      if speaker <= @max_speaker_id then
+        server_type = "voicevox"
+        break
+      end
+    # COEIROINKのSpeakerIDが指定された場合
+    elsif speaker =~ /^c([0-9]+)$/ then
+      speaker = $1.to_i
+      if @coeiroink_available_speakers.include?($1.to_i) then
+        server_type = "coeiroink"
+        break
+      end
+    # 1000回ランダム選択しても利用可能なSpeakerIDが選択されない場合は終了
     elsif counter > 1000 then
-      STDERR.print "設定RANDOM_SPEAKERの値からランダムなSpeakerIDを選択しましたが、利用のVOICEVOX ENGINEバージョンで使用できませんでした\n"
+      STDERR.print "RANDOM_SPEAKERの値からランダムなSpeakerIDを選択しましたが、利用のVOICEVOX/COEIROINK ENGINEで使用できませんでした\n"
       exit 1
     end
     counter+=1
   end
-elsif speaker.to_i < 0 or @max_speaker_id < speaker.to_i then
-  STDERR.print "\"-s (--speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数、または r を指定してください\n"
+else
+  STDERR.print "\"-s (--speaker)\" の値は、\"整数\" \"c整数\" または \"r\" を指定してください\n"
   exit 1
 end
 
@@ -1185,18 +1331,45 @@ conv_text.each{|text|
       speaker_element.each {|temp|
 
         # もし、「s<数字>」だったら声の種類を変更
-        if temp =~ /^ *s([0-9]+) *$/ then
-          speaker = $1.to_i
+        if temp =~ /^ *sc?[0-9]+ *$/ then
+          # 「sc<数字>」だったらCOEIROINKをセット
+          if temp =~ /^ *sc([0-9]+) *$/ then
+            speaker = $1
+            server_type = "coeiroink"
+            if not @coeiroink_available_speakers.include?(speaker.to_i) then
+              STDERR.print "指定のspeakerID \"#{speaker}\" は、利用のCOEIROINK ENGINEで使用できません\n"
+              exit 1
+            end
+          #「s<数字>」だったらvoicevoxをセット
+          elsif temp =~ /^ *s([0-9]+) *$/ then
+            speaker = $1
+            server_type = "voicevox"
+            if speaker.to_i > @max_speaker_id then
+              STDERR.print "指定のspeakerID \"#{speaker}\" は、利用のVOICEVOX ENGINEで使用できません\n"
+              exit 1
+            end
+          end
         # もし、「sr」「sR」だったら声の種類をランダムに設定
         elsif temp =~ /^ *s[rR] *$/ then
-          # 配列RANDOM_SPEAKERから選ばれた値が@max_speaker_id以下になるまで繰り返す
+          # 配列random_speaker_idから選ばれた値が@max_speaker_id以下になるまで繰り返す
           counter=0
           while true do
-            speaker = RANDOM_SPEAKER.sample
-            if speaker <= @max_speaker_id then
-              break
+            speaker = random_speaker_id.sample
+            # COEIROINKのSpeakerIDが指定された場合
+            if speaker[0] == "c" and speaker =~ /^c([0-9]+)$/ then
+              speaker = $1
+              if @coeiroink_available_speakers.include?($1.to_i) then
+                server_type = "coeiroink"
+                break
+              end
+            # VoicevoxのSpeakerIDが指定された場合
+            elsif speaker =~ /^([0-9]+)$/ then
+              if speaker.to_i <=  @max_speaker_id then
+                server_type = "voicevox"
+                break
+              end
             elsif counter > 1000 then
-              STDERR.print "設設定RANDOM_SPEAKERの値からランダムなSpeakerIDを選択しましたが、利用のVOICEVOX ENGINEバージョンで使用できませんでした\n"
+              STDERR.print "random_speaker_idの値からランダムなSpeakerIDを選択しましたが、利用のVOICEVOX/COEIROINK ENGINEで使用できませんでした\n"
               exit 1
             end
             counter+=1
@@ -1256,7 +1429,11 @@ conv_text.each{|text|
     if text_part[index] !~ /^[ \t\r\n]+$/ then
 
       # 文頭に埋め込む文字列を作成
-      head_str = "s#{speaker}"
+      if server_type == "voicevox" then
+        head_str = "tV,s#{speaker.to_s}"
+      elsif server_type == "coeiroink" then
+        head_str = "tC,s#{speaker.to_s}"
+      end
 
       # 声の種類
       if query_speaker == "" then
@@ -1398,53 +1575,88 @@ conv_text.each{|text|
   i = i + 1
 }
 
+# VOICEVOXとCOEIROINKで変換する文字列を分ける
+voicevox_input_text = Hash.new
+coeiroink_input_text = Hash.new
+input_text.each{|key,value|
+  if value =~ /^#\{tV,/ then
+    voicevox_input_text[key] = value
+  elsif value =~ /^#\{tC,/ then
+    coeiroink_input_text[key] = value
+  end
+}
+debug_print("voicevox_input_text=#{voicevox_input_text}")
+debug_print("coeiroink_input_text=#{coeiroink_input_text}")
+
+# 各サーバでの処理が完了したら1になるフラグ
+if voicevox_input_text.length > 0 then
+  vv_complete_flag = 0
+else
+  vv_complete_flag = 1
+end
+if coeiroink_input_text.length > 0 then
+  ci_complete_flag = 0
+else
+  ci_complete_flag = 1
+end
+
+# VOICEVOXとCOEIROINK両方を混ぜて音声変換する場合に、サンプリングレートを44100に統一する
+if voicevox_input_text.length > 0 and coeiroink_input_text.length > 0 then
+  voicevox_sample_rate = 44100
+  unite_sample_rate = 44100
+# VOICEVOXのみで音声変換する場合は、サンプリングレートは24000
+elsif voicevox_input_text.length > 0 and coeiroink_input_text.length == 0 then
+  unite_sample_rate = 24000
+# COEIROINKのみで音声変換する場合は、サンプリングレートは44100
+else
+  unite_sample_rate = 44100
+end
 
 # 最終的に出力するWavデータを格納する配列
 output_wavdata = Array.new
 
-# スレッドを格納するハッシュを初期化
-threads = Array.new
-
-# スレッドが処理中の input_text のキーと文字列を格納する配列
-thread_key = Array.new
-thread_text = Array.new
-
-# スレッドが使用中のサーバ(エンジン)のインデックスを格納する配列
-thread_server = Array.new
-
-# 使用されていないサーバ(エンジン)を格納する配列
-unuse_server = VOICEVOX_ENGINE.dup
-
 # 変換した文の数を数えるカウンタの初期化
 conv_count = 0
-
 # 変換が必要な文の数
 total_count = input_text.length
+
+
+## VOICEVOXを使用して変換するスレッドを実行する
+
+# VOICEVOXスレッドを格納するハッシュを初期化
+vv_threads = Array.new
+# VOICEVOXスレッドが処理中の input_text のキーと文字列を格納する配列
+vv_thread_key = Array.new
+vv_thread_text = Array.new
+# VOICEVOXスレッドが使用中のサーバ(エンジン)のインデックスを格納する配列
+vv_thread_server = Array.new
+# VOICEVOXの使用されていないサーバ(エンジン)を格納する配列
+vv_unuse_server = VOICEVOX_ENGINE.dup
 
 # どのスレッドに割り当てるかを決める変数
 i = 0
 
-# 最初のスレッド実行
-input_text.each{|key,value|
+# 最初のVOICEVOXスレッド実行
+voicevox_input_text.each{|key,value|
 
   # まだ変換すべき文字列と割り当てるサーバ(エンジン)が残っていれば
-  if 0 < input_text.length and i < VOICEVOX_ENGINE.length then
+  if 0 < voicevox_input_text.length and i < VOICEVOX_ENGINE.length then
 
     # スレッドが処理中のキー、テキストにセット
-    thread_key[i] = key
-    thread_text[i] = value
+    vv_thread_key[i] = key
+    vv_thread_text[i] = value
 
     # 未使用サーバから割り当てるサーバ(エンジン)を削除
-    unuse_server.delete(VOICEVOX_ENGINE[i])
+    vv_unuse_server.delete(VOICEVOX_ENGINE[i])
 
     # スレッドが使用中のサーバ(エンジン)をセット
-    thread_server[i] = VOICEVOX_ENGINE[i]
+    vv_thread_server[i] = VOICEVOX_ENGINE[i]
 
     # スレッドに渡す用の一時的変数
     server_temp = VOICEVOX_ENGINE[i]
 
-    # input_textから取り除く
-    input_text.delete(key)
+    # voicevox_input_textから取り除く
+    voicevox_input_text.delete(key)
 
     # 変換した文の数をカウントする変数を増やす
     conv_count = conv_count + 1
@@ -1460,7 +1672,7 @@ input_text.each{|key,value|
     end
 
     # スレッドを作成して音声変換を実行させる
-    threads[i] = Thread.new { thread_proc( server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag ) }
+    vv_threads[i] = Thread.new { thread_proc( "voicevox", server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, voicevox_sample_rate ) }
 
   # 変換すべき文字列と割り当てるサーバのどちらかがなければ最初のスレッド実行は終了
   else
@@ -1471,6 +1683,70 @@ input_text.each{|key,value|
   i = i + 1
 }
 
+
+## COEIROINKを使用して変換するスレッドを実行する
+
+# COEIROINKスレッドを格納するハッシュを初期化
+ci_threads = Array.new
+# COEIROINKスレッドが処理中の input_text のキーと文字列を格納する配列
+ci_thread_key = Array.new
+ci_thread_text = Array.new
+# COEIROINKスレッドが使用中のサーバ(エンジン)のインデックスを格納する配列
+ci_thread_server = Array.new
+# COEIROINKの使用されていないサーバ(エンジン)を格納する配列
+ci_unuse_server = COEIROINK_ENGINE.dup
+
+# どのスレッドに割り当てるかを決める変数
+i = 0
+
+# 最初のCOEIROINKスレッド実行
+coeiroink_input_text.each{|key,value|
+
+  # まだ変換すべき文字列と割り当てるサーバ(エンジン)が残っていれば
+  if 0 < coeiroink_input_text.length and i < COEIROINK_ENGINE.length then
+
+    # スレッドが処理中のキー、テキストにセット
+    ci_thread_key[i] = key
+    ci_thread_text[i] = value
+
+    # 未使用サーバから割り当てるサーバ(エンジン)を削除
+    ci_unuse_server.delete(COEIROINK_ENGINE[i])
+
+    # スレッドが使用中のサーバ(エンジン)をセット
+    ci_thread_server[i] = COEIROINK_ENGINE[i]
+
+    # スレッドに渡す用の一時的変数
+    server_temp = COEIROINK_ENGINE[i]
+
+    # voicevox_input_textから取り除く
+    coeiroink_input_text.delete(key)
+
+    # 変換した文の数をカウントする変数を増やす
+    conv_count = conv_count + 1
+
+    # 進捗表示
+    if quiet_flag == 0 then
+      STDERR.print "#{conv_count}/#{total_count} [#{key}] \"#{orig_text[key].chomp}\"\n"
+    end
+
+    # 詳細メッセージ
+    if verbous_flag == 1 then
+      STDERR.print "    => \"#{value.chomp}\"\n"
+    end
+
+    # スレッドを作成して音声変換を実行させる
+    ci_threads[i] = Thread.new { thread_proc( "coeiroink", server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, coeiroink_sample_rate ) }
+
+  # 変換すべき文字列と割り当てるサーバのどちらかがなければ最初のスレッド実行は終了
+  else
+    break
+  end
+
+  # スレッド番号を増やす
+  i = i + 1
+}
+
+
 # スレッド実行したらループでスレッドの監視を行う
 catch :loop do
   while true
@@ -1478,157 +1754,321 @@ catch :loop do
     # 1秒待つ
     sleep 1
 
-    # スレッド状態をチェック
-    threads.each_with_index{|thr,index|
-
-      # スレッドが異常終了している場合
-      if threads[index].status.nil? then
-
-        # エラー表示して終了
-        STDERR.print "スレッドが異常終了したため終了します\n"
-        exit 1
-
-      # スレッドが正常終了している場合
-      elsif threads[index].status == false and thread_key[index] != "" then
-
-        # 音声データが返ってきたら
-        if not threads[index].value.nil? then
-
-          # どのインデックスの音声データか調べる
-          thread_key[index] =~ /^([0-9]+)\-([0-9]+)$/
-          p_num = $1.to_i
-          s_num = $2.to_i
-
-          # もし output_wavdata[文節番号] が nil であれば空の配列で初期化
-          if output_wavdata[p_num].nil? then
-            output_wavdata[p_num] = Array.new
-          end
-
-          # output_wavdata[文節番号][文章番号] に音声データを格納
-          output_wavdata[p_num][s_num] = threads[index].value
-
-          # まだ input_text に残っていたら新しいスレッドを実行する
-          if input_text.length > 0 then
-
-            # input_text に残っているデータで新しいスレッドを実行する
-            input_text.each{|key,value|
-
-              # スレッドが処理中のキー、テキストにセット
-              thread_key[index] = key
-              thread_text[index] = value
-
-              # スレッドが使用中のサーバをセット
-              server_temp = thread_server[index]
-
-              # input_textから取り除く
-              input_text.delete(key)
-
-              # 変換した文の数のカウントを増やす
-              conv_count = conv_count + 1
-
+    # VOICEVOXの処理が完了していなかったら
+    if vv_complete_flag == 0 then
+      # VOICEVOXスレッド状態をチェック
+      vv_threads.each_with_index{|thr,index|
+  
+        # VOICEVOXスレッドが異常終了している場合
+        if vv_threads[index].status.nil? then
+  
+          # エラー表示して終了
+          STDERR.print "スレッドが異常終了したため終了します\n"
+          exit 1
+  
+        # VOICEVOXスレッドが正常終了している場合
+        elsif vv_threads[index].status == false and vv_thread_key[index] != "" then
+  
+          # 音声データが返ってきたら
+          if not vv_threads[index].value.nil? then
+  
+            # どのインデックスの音声データか調べる
+            vv_thread_key[index] =~ /^([0-9]+)\-([0-9]+)$/
+            p_num = $1.to_i
+            s_num = $2.to_i
+  
+            # もし output_wavdata[文節番号] が nil であれば空の配列で初期化
+            if output_wavdata[p_num].nil? then
+              output_wavdata[p_num] = Array.new
+            end
+  
+            # output_wavdata[文節番号][文章番号] に音声データを格納
+            output_wavdata[p_num][s_num] = vv_threads[index].value
+  
+            # まだ voicevox_input_text に残っていたら新しいスレッドを実行する
+            if voicevox_input_text.length > 0 then
+  
+              # voicevox_input_text に残っているデータで新しいスレッドを実行する
+              voicevox_input_text.each{|key,value|
+  
+                # スレッドが処理中のキー、テキストにセット
+                vv_thread_key[index] = key
+                vv_thread_text[index] = value
+  
+                # スレッドが使用中のサーバをセット
+                server_temp = vv_thread_server[index]
+  
+                # voicevox_input_textから取り除く
+                voicevox_input_text.delete(key)
+  
+                # 変換した文の数のカウントを増やす
+                conv_count = conv_count + 1
+  
+                # 進捗表示
+                if quiet_flag == 0 then
+                  STDERR.print "#{conv_count}/#{total_count} [#{key}] \"#{orig_text[key].chomp}\"\n"
+                end
+  
+                # 詳細メッセージ
+                if verbous_flag == 1 then
+                  STDERR.print "    => \"#{value.chomp}\"\n"
+                end
+  
+                # スレッドを作成して音声変換を実行させる
+                vv_threads[index] = Thread.new { thread_proc( "voicevox", server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, voicevox_sample_rate ) }
+  
+                # each文を抜ける
+                break
+              }
+  
+            # input_text が空になった場合は新しいスレッドは実行せず、実行中のスレッドの状態をチェック
+            else
+  
+              # VOICEVOXスレッドが使用中のキー、テキストをクリア
+              vv_thread_key[index] = ""
+              vv_thread_text[index] = ""
+              break_flag = 1
+  
+              # 未使用のVOICEVOXサーバに戻す
+              vv_unuse_server << vv_thread_server[index]
+  
+              # 実行中のスレッドがあるかチェック
+              vv_thread_key.each_with_index{|tkey|
+                # 実行中スレッドがあれば
+                if tkey != "" then
+                  break_flag = 0
+                end
+              }
+  
+              # 実行中のスレッドがなければループを抜ける
+              if break_flag == 1 then
+                vv_complete_flag = 1
+              end
+            end
+  
+          # 音声データ取得に失敗していたら、それ以降そのサーバは使用しない
+          else      
+  
+            STDERR.print "サーバ \"#{vv_thread_server[index]}\" は除外します\n"
+  
+            # 未使用のVOICEVOXサーバがなければキー、テキストをvoicevox_input_textに戻す
+            if vv_unuse_server.length == 0 then
+  
+              # 変換した文の数のカウントを減らす
+              conv_count = conv_count - 1
+  
+              # スレッドが処理していたキー、テキストをvoicevox_input_textに戻す
+              voicevox_input_text[ vv_thread_key[index] ] = vv_thread_text[index]
+  
+              # スレッドが使用中のキー、テキスト、サーバをクリア
+              vv_thread_key[index] = ""
+              vv_thread_text[index] = ""
+              vv_thread_server[index] = ""
+  
+              # 使用可能なVOICEVOXサーバがあるかチェック
+              available_server_flag = 0
+              vv_thread_server.each {|thvalue|
+                if thvalue != "" then
+                  available_server_flag = 1
+                end
+              }
+  
+              # 全ての使用可能なVOICEVOXサーバがなくなったらエラー終了
+              if available_server_flag == 0 then
+                STDERR.print "利用可能なVOICEVOXサーバがありません\n"
+                exit 1
+              end
+  
+            # 未使用のVOICEVOXサーバがあればそちらのサーバでスレッドを起動する
+            else
+  
+              # 未使用VOICEVOXサーバの最初のものを割り当て
+              vv_thread_server[index] = vv_unuse_server[0]
+              vv_unuse_server.delete(vv_thread_server[index])
+  
+              # VOICEVOXスレッドが使用中のサーバをセット
+              server_temp = vv_thread_server[index]
+  
               # 進捗表示
               if quiet_flag == 0 then
-                STDERR.print "#{conv_count}/#{total_count} [#{key}] \"#{orig_text[key].chomp}\"\n"
+                STDERR.print "#{conv_count}/#{total_count} [#{vv_thread_key[index]}] \"#{orig_text[vv_thread_key[index]].chomp}\"\n"
               end
-
+  
               # 詳細メッセージ
               if verbous_flag == 1 then
-                STDERR.print "    => \"#{value.chomp}\"\n"
+                STDERR.print "    => \"#{vv_thread_text[index].chomp}\"\n"
               end
-
-              # スレッドを作成して音声変換を実行させる
-              threads[index] = Thread.new { thread_proc( server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag ) }
-
-              # each文を抜ける
-              break
-            }
-
-          # input_text が空になった場合は新しいスレッドは実行せず、実行中のスレッドの状態をチェック
-          else
-
-            # スレッドが使用中のキー、テキストをクリア
-            thread_key[index] = ""
-            thread_text[index] = ""
-            break_flag = 1
-
-            # 未使用のサーバに戻す
-            unuse_server << thread_server[index]
-
-            # 実行中のスレッドがあるかチェック
-            thread_key.each_with_index{|tkey|
-              # 実行中スレッドがあれば
-              if tkey != "" then
-                break_flag = 0
-              end
-            }
-
-            # 実行中のスレッドがなければループを抜ける
-            if break_flag == 1 then
-              throw :loop
+  
+              # VOICEVOXスレッドを作成して音声変換を実行させる
+              vv_threads[index] = Thread.new { thread_proc( "voicevox", server_temp, vv_thread_text[index], speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, voicevox_sample_rate ) }
+  
             end
+  
           end
-
-        # 音声データ取得に失敗していたら、それ以降そのサーバは使用しない
-        else      
-
-          STDERR.print "サーバ \"#{thread_server[index]}\" は除外します\n"
-
-          # 未使用のサーバがなければキー、テキストをinput_textに戻す
-          if unuse_server.length == 0 then
-
-            # 変換した文の数のカウントを減らす
-            conv_count = conv_count - 1
-
-            # スレッドが処理していたキー、テキストをinput_textに戻す
-            input_text[ thread_key[index] ] = thread_text[index]
-
-            # スレッドが使用中のキー、テキスト、サーバをクリア
-            thread_key[index] = ""
-            thread_text[index] = ""
-            thread_server[index] = ""
-
-            # 使用可能なサーバがあるかチェック
-            available_server_flag = 0
-            thread_server.each {|thvalue|
-              if thvalue != "" then
-                available_server_flag = 1
-              end
-            }
-
-            # 全ての使用可能なサーバがなくなったらエラー終了
-            if available_server_flag == 0 then
-              STDERR.print "利用可能なサーバがありません\n"
-              exit 1
-            end
-
-          # 未使用のサーバがあればそちらのサーバでスレッドを起動する
-          else
-
-            # 未使用サーバの最初のものを割り当て
-            thread_server[index] = unuse_server[0]
-            unuse_server.delete(thread_server[index])
-
-            # スレッドが使用中のサーバをセット
-            server_temp = thread_server[index]
-
-            # 進捗表示
-            if quiet_flag == 0 then
-              STDERR.print "#{conv_count}/#{total_count} [#{thread_key[index]}] \"#{orig_text[thread_key[index]].chomp}\"\n"
-            end
-
-            # 詳細メッセージ
-            if verbous_flag == 1 then
-              STDERR.print "    => \"#{thread_text[index].chomp}\"\n"
-            end
-
-            # スレッドを作成して音声変換を実行させる
-            threads[index] = Thread.new { thread_proc( server_temp, thread_text[index], speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag ) }
-
-          end
-
         end
-      end
-    }
+      }
+    end
+
+    # COEIROINKの処理が完了していなかったら
+    if ci_complete_flag == 0 then
+      # COEIROINKスレッド状態をチェック
+      ci_threads.each_with_index{|thr,index|
+  
+        # COEIROINKスレッドが異常終了している場合
+        if ci_threads[index].status.nil? then
+  
+          # エラー表示して終了
+          STDERR.print "スレッドが異常終了したため終了します\n"
+          exit 1
+  
+        # COEIROINKスレッドが正常終了している場合
+        elsif ci_threads[index].status == false and ci_thread_key[index] != "" then
+  
+          # 音声データが返ってきたら
+          if not ci_threads[index].value.nil? then
+  
+            # どのインデックスの音声データか調べる
+            ci_thread_key[index] =~ /^([0-9]+)\-([0-9]+)$/
+            p_num = $1.to_i
+            s_num = $2.to_i
+  
+            # もし output_wavdata[文節番号] が nil であれば空の配列で初期化
+            if output_wavdata[p_num].nil? then
+              output_wavdata[p_num] = Array.new
+            end
+  
+            # output_wavdata[文節番号][文章番号] に音声データを格納
+            output_wavdata[p_num][s_num] = ci_threads[index].value
+  
+            # まだ coeiroink_input_text に残っていたら新しいスレッドを実行する
+            if coeiroink_input_text.length > 0 then
+  
+              # coeiroink_input_text に残っているデータで新しいスレッドを実行する
+              coeiroink_input_text.each{|key,value|
+  
+                # スレッドが処理中のキー、テキストにセット
+                ci_thread_key[index] = key
+                ci_thread_text[index] = value
+  
+                # スレッドが使用中のサーバをセット
+                server_temp = ci_thread_server[index]
+  
+                # coeiroink_input_textから取り除く
+                coeiroink_input_text.delete(key)
+  
+                # 変換した文の数のカウントを増やす
+                conv_count = conv_count + 1
+  
+                # 進捗表示
+                if quiet_flag == 0 then
+                  STDERR.print "#{conv_count}/#{total_count} [#{key}] \"#{orig_text[key].chomp}\"\n"
+                end
+  
+                # 詳細メッセージ
+                if verbous_flag == 1 then
+                  STDERR.print "    => \"#{value.chomp}\"\n"
+                end
+  
+                # スレッドを作成して音声変換を実行させる
+                ci_threads[index] = Thread.new { thread_proc( "coeiroink", server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, coeiroink_sample_rate ) }
+  
+                # each文を抜ける
+                break
+              }
+  
+            # coeiroink_input_text が空になった場合は新しいスレッドは実行せず、実行中のスレッドの状態をチェック
+            else
+  
+              # COEIROINKスレッドが使用中のキー、テキストをクリア
+              ci_thread_key[index] = ""
+              ci_thread_text[index] = ""
+              break_flag = 1
+  
+              # 未使用のCOEIROINKサーバに戻す
+              ci_unuse_server << ci_thread_server[index]
+  
+              # 実行中のスレッドがあるかチェック
+              ci_thread_key.each_with_index{|tkey|
+                # 実行中スレッドがあれば
+                if tkey != "" then
+                  break_flag = 0
+                end
+              }
+  
+              # 実行中のスレッドがなければci_complete_flagを1にする
+              if break_flag == 1 then
+                ci_complete_flag = 1
+              end
+            end
+  
+          # 音声データ取得に失敗していたら、それ以降そのサーバは使用しない
+          else      
+  
+            STDERR.print "サーバ \"#{ci_thread_server[index]}\" は除外します\n"
+  
+            # 未使用のCOEIROINKサーバがなければキー、テキストをcoeiroink_input_textに戻す
+            if ci_unuse_server.length == 0 then
+  
+              # 変換した文の数のカウントを減らす
+              conv_count = conv_count - 1
+  
+              # スレッドが処理していたキー、テキストをvoicevox_input_textに戻す
+              coeiroink_input_text[ ci_thread_key[index] ] = ci_thread_text[index]
+  
+              # スレッドが使用中のキー、テキスト、サーバをクリア
+              ci_thread_key[index] = ""
+              ci_thread_text[index] = ""
+              ci_thread_server[index] = ""
+  
+              # 使用可能なCOEIROINKサーバがあるかチェック
+              available_server_flag = 0
+              ci_thread_server.each {|thvalue|
+                if thvalue != "" then
+                  available_server_flag = 1
+                end
+              }
+  
+              # 全ての使用可能なCOEIROINKサーバがなくなったらエラー終了
+              if available_server_flag == 0 then
+                STDERR.print "利用可能なCOEIROINKサーバがありません\n"
+                exit 1
+              end
+  
+            # 未使用のCOEIROINKサーバがあればそちらのサーバでスレッドを起動する
+            else
+  
+              # 未使用COEIROINKサーバの最初のものを割り当て
+              ci_thread_server[index] = ci_unuse_server[0]
+              ci_unuse_server.delete(ci_thread_server[index])
+  
+              # COEIROINKスレッドが使用中のサーバをセット
+              server_temp = ci_thread_server[index]
+  
+              # 進捗表示
+              if quiet_flag == 0 then
+                STDERR.print "#{conv_count}/#{total_count} [#{ci_thread_key[index]}] \"#{orig_text[ci_thread_key[index]].chomp}\"\n"
+              end
+  
+              # 詳細メッセージ
+              if verbous_flag == 1 then
+                STDERR.print "    => \"#{ci_thread_text[index].chomp}\"\n"
+              end
+  
+              # COEIROINKスレッドを作成して音声変換を実行させる
+              ci_threads[index] = Thread.new { thread_proc( "coeiroink", server_temp, ci_thread_text[index], speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, coeiroink_sample_rate ) }
+  
+            end
+  
+          end
+        end
+      }
+    end
+
+    # VOICEVOX、COEIROINK両方の処理が終わったらループを抜ける
+    if vv_complete_flag == 1 and ci_complete_flag == 1 then
+      throw :loop
+    end
+  
   end
 end
 
@@ -1643,11 +2083,11 @@ if play_flag == 1 or single_output_flag == 1 or stdout_flag == 1 then
   output_wavdata.each_with_index {|wav_list, index|
 
     # 結合して1つのwavデータにしたものをwavデータ配列に追加
-    temp_wav_list[index] = unite_wav(wav_list, interval_time, 0.0, 0.0)
+    temp_wav_list[index] = unite_wav(wav_list, interval_time, 0.0, 0.0, unite_sample_rate)
   }
 
   # 段落ごとの音声データを繋げる
-  output_wav = unite_wav(temp_wav_list, paragraph_interval_time, first_silent_time, last_silent_time)
+  output_wav = unite_wav(temp_wav_list, paragraph_interval_time, first_silent_time, last_silent_time, unite_sample_rate)
 
   # 標準出力に出力する場合
   if stdout_flag == 1 then
@@ -1710,7 +2150,7 @@ else
     count = index + 1
 
     # 結合して1つのwavデータにしたものをwavデータ配列に追加
-    wavdata = unite_wav(wav_list, interval_time, first_silent_time, last_silent_time)
+    wavdata = unite_wav(wav_list, interval_time, first_silent_time, last_silent_time, unite_sample_rate)
 
     # wavで保存する場合
     if mp3_flag == 0 then

@@ -940,6 +940,11 @@ debug_print("speaker=#{speaker}")
 if speaker =~ /^([0-9]+)/ then
   server_type = "voicevox"
   speaker = $1.to_i
+  # VOICEVOX ENGINEが指定されていなかったら
+  if VOICEVOX_ENGINE == [] then
+    STDERR.print "VOICEVOX ENGINEが設定されていないため、SpeakerID \"#{speaker}\" は指定できません\n"
+    exit 1
+  end
   # VOICEVOXサーバで使用できないSpeakerIDの場合
   if @max_speaker_id < speaker then
     STDERR.print "VOICEVOX の -s (--speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数を指定してください\n"
@@ -949,6 +954,11 @@ if speaker =~ /^([0-9]+)/ then
 elsif speaker =~ /^c([0-9]+)/ then
   server_type = "coeiroink"
   speaker = $1.to_i
+  # COEIROINK ENGINEが指定されていなかったら
+  if COEIROINK_ENGINE == [] then
+    STDERR.print "COEIROINK ENGINEが設定されていないため、SpeakerID \"c#{speaker}\" は指定できません\n"
+    exit 1
+  end
   # COEIROINKサーバで使用できないSpeakerIDの場合
   if not @coeiroink_available_speakers.include?(speaker) then
     STDERR.print "-s (--speaker)\" の値は、COEIROINKサーバで使用できません\n"

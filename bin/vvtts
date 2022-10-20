@@ -344,7 +344,7 @@ def text2wav_morph(type, server, text, base_speaker, target_speaker, morph_rate,
     http = Net::HTTP.new(uri.host, uri.port)
     http.read_timeout = HTTP_TIMEOUT
     # デバッグメッセージ
-    debug_print("URI=\"http://#{server}//synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}\"")
+    debug_print("URI=\"http://#{server}/synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}\"")
     # 音声データを取得
     voice = http.post("/synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}", res.body, headers)
     # デバッグメッセージ
@@ -990,25 +990,48 @@ end
 # query_speaker の値チェック
 if query_speaker != "" then
   debug_print("query_speaker=#{query_speaker}")
-  if not query_speaker =~ /^[0-9]+$/ then
-    STDERR.print "\"--query\" の値は、0～#{@max_speaker_id} のいずれかを整数で指定してください\n"
+  # もし、query_speakerが「c<数字>」形式だったら「c」を削除する
+  if query_speaker =~ /^c([0-9]+)$/ then
+    query_speaker = $1
+  end
+  if query_speaker !~ /^[0-9]+$/ then
+    STDERR.print "\"--query\" の値は整数で指定してください\n"
     exit 1
-  elsif query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i then
-    STDERR.print "\"--query\" の値は、0～#{@max_speaker_id} のいずれかを整数で指定してください\n"
-    exit 1
+  end
+  if server_type == "voicevox" then
+    if query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i then
+      STDERR.print "\"--query\" の値は、VOICEVOX ENGINEで使用できないSpeakerIDです。0～#{@max_speaker_id} のいずれかを整数で指定してください\n"
+      exit 1
+    end
+  elsif server_type == "coeiroink" then
+    if not @coeiroink_available_speakers.include?(query_speaker.to_i) then
+      STDERR.print "\"--query\" の値　\"#{query_speaker}\" は、COEIROINK ENGINEで使用できないSpeakerIDです\n"
+      exit 1
+    end
   end
 end
 
 # morph_speaker の値チェック
 debug_print("morph_speaker=#{morph_speaker}, morph_rate=#{morph_rate}")
+# もし、morph_speakerが「c<数字>」形式だったら「c」を削除する
+if morph_speaker =~ /^c([0-9]+)$/ then
+  morph_speaker = $1
+end
 if morph_speaker != "" or morph_rate != "" then
   if (not morph_speaker =~ /^[0-9]+$/) or (not morph_rate =~ /^[0-9]\.[0-9]$/) then
-    STDERR.print "\"-m (--morph_speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
+    STDERR.print "\"-m (--morph_speaker)\" の値は整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
     exit 1
   end
-  if morph_rate.to_f < 0.0 or 1.0 < morph_rate.to_f or morph_speaker.to_i < 0 or @max_speaker_id < morph_speaker.to_i then
-    STDERR.print "\"-m (--morph_speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数と、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
-    exit 1
+  if server_type == "voicevox" then
+    if morph_rate.to_f < 0.0 or 1.0 < morph_rate.to_f or morph_speaker.to_i < 0 or @max_speaker_id < morph_speaker.to_i then
+      STDERR.print "\"-m (--morph_speaker)\" の値は、VOICEVOX ENGINEで使用可能な 0～#{@max_speaker_id} のいずれかのSpeakerIDと、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
+      exit 1
+    end
+  elsif server_type == "coeiroink" then
+    if morph_rate.to_f < 0.0 or 1.0 < morph_rate.to_f or (not @coeiroink_available_speakers.include?(query_speaker.to_i)) then
+      STDERR.print "\"-m (--morph_speaker)\" の値は、COEIROINK ENGINEで使用可能なSpeakerIDと、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
+      exit 1
+    end
   end
 end
 

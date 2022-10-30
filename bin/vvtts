@@ -356,7 +356,7 @@ def text2wav_morph(type, server, text, base_speaker, target_speaker, morph_rate,
       return voice.body
     # 音声データ変換に失敗したら
     elsif voice.code == "500" then
-      STDERR.print "文字数が多すぎるため音声データ変換に失敗しました (ret=#{voice.code} json_size=#{res.body.length}) json_size が 57400 程度より小さいとうまくいく可能性が高いです\n"
+      STDERR.print "文字数が多すぎるため音声データ変換に失敗しました (ret=#{voice.code} json_size=#{res.body.length})\n"
       return nil
     else
       STDERR.print "音声データ変換に失敗しました (ret=#{voice.code})\n"
@@ -793,13 +793,156 @@ debug_print("mp3_flag=#{mp3_flag}")
 debug_print("quiet_flag=#{quiet_flag}")
 debug_print("output_filename=#{output_filename}")
 
+# ENGINEをチェックするフラグが1だったら
+if check_flag == 1 then
+  debug_print("エンジンの状態をチェックします")
+  # VOICEVOX ENGINEの指定があれば
+  if (not VOICEVOX_ENGINE.nil?) and VOICEVOX_ENGINE.length > 0 then
+    VOICEVOX_ENGINE.each{|server|
+      uri = URI.parse("http://#{server}/version")
+      http = Net::HTTP.new(uri.host, uri.port)
+      res = nil
+      begin
+        Timeout.timeout(5){
+          res = http.get(uri)
+        }
+      rescue => e
+        debug_print("VOICEVOX ENGINE \"#{server}\" 接続時にエラーが発生しました(#{e.message})")
+        res = nil
+      end
+      if (not res.nil?) and res.body =~ /^\"[0-9]+\.[0-9]+\.[0-9]+\"$/ then
+        print "voicevox engine=#{server} version=#{res.body.chomp} max_speaker_id=#{@max_speaker_id} status=OK\n"
+      else
+        print "voicevox engine=#{server} status=NG\n"
+      end
+    }
+  end
+  # COEIROINK ENGINEの指定があれば、指定可能なSpeakerID一覧を求める
+  if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then 
+    COEIROINK_ENGINE.each{|server|
+      uri = URI.parse("http://#{server}/version")
+      http = Net::HTTP.new(uri.host, uri.port)
+      res = nil
+      begin
+        Timeout.timeout(5){
+          res = http.get(uri)
+        }
+      rescue => e
+        debug_print("COEIROINK ENGINE \"#{server}\" 接続時にエラーが発生しました(#{e.message})")
+        res = nil
+      end
+      if (not res.nil?) then
+        @coeiroink_available_speakers = get_available_speakerid(COEIROINK_ENGINE[0])
+        debug_print("server=#{server} coeiroink_available_speakers=#{@coeiroink_available_speakers}")
+        print "coeiroink engine=#{server} version=#{res.body.chomp} enable_speaker_id=#{@coeiroink_available_speakers} status=OK\n"
+      else
+        print "coeiroink engine=#{server} status=NG\n"
+      end
+    }
+  end
+  exit
+end
+
 # ランダム声種が指定されたときの選択配列をコピー
 random_speaker_id = RANDOM_SPEAKER.dup
 
-# 設定ファイルでVOICEVOX ENGINEの指定があれば
+# 設定されたVOICEVOX ENGINEのうち使えるものをチェック
 if (not VOICEVOX_ENGINE.nil?) and VOICEVOX_ENGINE.length > 0 then
+  chk_thread = Array.new
+  VOICEVOX_ENGINE.each_with_index{|engine,index|
+    # スレッドで各サーバをチェック
+    chk_thread[index]=Thread.new{
+      uri = URI.parse("http://#{engine}/version")
+      http = Net::HTTP.new(uri.host, uri.port)
+      res = nil
+      begin
+        Timeout.timeout(5){
+          res = http.get(uri)
+        }
+      rescue => e
+        debug_print("VOICEVOX ENGINE \"#{engine}\" 接続時にエラーが発生しました(#{e.message})")
+      end
+      if (not res.nil?) and res.code == "200" then
+        # VOICEVOX ENGINEのホスト、ポートを返す
+        engine
+      else
+        if quiet_flag == 0 then
+          STDERR.print "VOICEVOX ENGINE \"#{engine}\" は使用できないため除外します\n"
+        end
+        debug_print("VOICEVOX ENGINE \"#{engine}\" は使用できないため除外します")
+        nil
+      end
+    }  
+  }
+  chk_thread.each {|thr| thr.join }
+  @voicevox_engines = Array.new
+  chk_thread.each{|thr|
+    if not thr.value.nil? then
+      @voicevox_engines << thr.value
+    end
+  }
+  if @voicevox_engines.length == 0 then
+    if quiet_flag == 0 then
+      STDERR.print "全ての VOICEVOX ENGINEが除外されました\n"
+    end
+    debug_print("全ての VOICEVOX ENGINEが除外されました")
+  end
+else
+  @voicevox_engines = []
+end
+debug_print("@voicevox_engines=#{@voicevox_engines}")
+
+# 設定されたCOEIROINK ENGINEのうち使えるものをチェック
+if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then
+  chk_thread = Array.new
+  COEIROINK_ENGINE.each_with_index{|engine,index|
+    # スレッドで各サーバをチェック
+    chk_thread[index]=Thread.new{
+      uri = URI.parse("http://#{engine}/version")
+      http = Net::HTTP.new(uri.host, uri.port)
+      res = nil
+      begin
+        Timeout.timeout(5){
+          res = http.get(uri)
+        }
+      rescue => e
+        debug_print("COEIROINK ENGINE \"#{engine}\" 接続時にエラーが発生しました(#{e.message})")
+        nil
+      end
+      if (not res.nil?) and res.code == "200" then
+        # COEIROINK ENGINEのホスト、ポートを返す
+        engine
+      else
+        if quiet_flag == 0 then
+          STDERR.print "COEIROINK ENGINE \"#{engine}\" は使用できないため除外します\n"
+        end
+        debug_print("COEIROINK ENGINE \"#{engine}\" は使用できないため除外します")
+        nil
+      end
+    }  
+  }
+  chk_thread.each {|thr| thr.join }
+  @coeiroink_engines = Array.new
+  chk_thread.each{|thr|
+    if not thr.value.nil? then
+      @coeiroink_engines << thr.value
+    end
+  }
+  if @coeiroink_engines.length == 0 then
+    if quiet_flag == 0 then
+      STDERR.print "全ての COEIROINK ENGINEが除外されました\n"
+    end
+    debug_print("全ての COEIROINK ENGINEが除外されました")
+  end
+else
+  @coeiroink_engines = []
+end
+debug_print("@coeiroink_engines=#{@coeiroink_engines}")
+
+# 設定ファイルで指定された中で使用可能なVOICEVOX ENGINEがあれば
+if (not @voicevox_engines.nil?) and @voicevox_engines.length > 0 then
   # 最初のVOICEVOX ENGINEからバージョン番号を取得
-  uri = URI.parse("http://#{VOICEVOX_ENGINE[0]}/version")
+  uri = URI.parse("http://#{@voicevox_engines[0]}/version")
   http = Net::HTTP.new(uri.host, uri.port)
   res = nil
   begin
@@ -845,7 +988,7 @@ if (not VOICEVOX_ENGINE.nil?) and VOICEVOX_ENGINE.length > 0 then
     end
   }
   random_speaker_id = random_speaker_id - temp_array
-# 設定ファイルでVOICEVOX ENGINEの指定がなければ、ランダム選択の声種からVOICEVOXのものをすべて取り除く
+# 使用可能なVOICEVOX ENGINEがなければ、ランダム選択の声種からVOICEVOXのものをすべて取り除く
 else
   temp_array = Array.new
   random_speaker_id.each{|value|
@@ -857,9 +1000,9 @@ else
   debug_print("RANDAM_SPEAKERからVOICEVOXの声種を削除しました (RANDOM_SPEAKER=#{random_speaker_id})")
 end
 
-# 設定ファイルでCOEIROINK ENGINEの指定があれば、指定可能なSpeakerID一覧を求める
-if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then
-  @coeiroink_available_speakers = get_available_speakerid(COEIROINK_ENGINE[0])
+# 設定ファイルで指定された中で使用可能なCOEIROINK ENGINEがあれば、指定可能なSpeakerID一覧を求める
+if (not @coeiroink_engines.nil?) and @coeiroink_engines.length > 0 then
+  @coeiroink_available_speakers = get_available_speakerid(@coeiroink_engines[0])
   if @coeiroink_available_speakers.nil? then
     STDERR.print "COEIROINKサーバから、指定可能なSpeakerID一覧が取得できません\n"
     exit 1
@@ -875,7 +1018,7 @@ if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then
     end
   }
   random_speaker_id = random_speaker_id - temp_array
-# 設定ファイルでCOEIROINK ENGINEの指定がなければ、ランダム選択の声種からCOEIROINKのものを取り除く
+# 使用可能なCOEIROINK ENGINEがなければ、ランダム選択の声種からCOEIROINKのものを取り除く
 else
   temp_array = Array.new
   random_speaker_id.each{|value|
@@ -887,53 +1030,6 @@ else
   debug_print("RANDAM_SPEAKERからCOEIROINKの声種を削除しました (RANDOM_SPEAKER=#{random_speaker_id})")
 end
 
-# ENGINEをチェックするフラグが1だったら
-if check_flag == 1 then
-  debug_print("エンジンの状態をチェックします")
-  # VOICEVOX ENGINEの指定があれば
-  if (not VOICEVOX_ENGINE.nil?) and VOICEVOX_ENGINE.length > 0 then
-    VOICEVOX_ENGINE.each{|server|
-      uri = URI.parse("http://#{server}/version")
-      http = Net::HTTP.new(uri.host, uri.port)
-      res = nil
-      begin
-        Timeout.timeout(5){
-          res = http.get(uri)
-        }
-      rescue Timeout::Error
-        res = nil
-      end
-      if (not res.nil?) and res.body =~ /^\"[0-9]+\.[0-9]+\.[0-9]+\"$/ then
-        print "voicevox engine=#{server} version=#{res.body.chomp} max_speaker_id=#{@max_speaker_id} status=OK\n"
-      else
-        print "voicevox engine=#{server} status=NG\n"
-      end
-    }
-  end
-  # COEIROINK ENGINEの指定があれば、指定可能なSpeakerID一覧を求める
-  if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then 
-    COEIROINK_ENGINE.each{|server|
-      uri = URI.parse("http://#{server}/version")
-      http = Net::HTTP.new(uri.host, uri.port)
-      res = nil
-      begin
-        Timeout.timeout(5){
-          res = http.get(uri)
-        }
-      rescue Timeout::Error
-        res = nil
-      end
-      @coeiroink_available_speakers = get_available_speakerid(COEIROINK_ENGINE[0])
-      debug_print("server=#{server} coeiroink_available_speakers=#{@coeiroink_available_speakers}")
-      if (not res.nil?) then
-        print "coeiroink engine=#{server} version=#{res.body.chomp} enable_speaker_id=#{@coeiroink_available_speakers} status=OK\n"
-      else
-        print "coeiroink engine=#{server} status=NG\n"
-      end
-    }
-  end
-  exit
-end
 
 # speaker の値チェック
 debug_print("speaker=#{speaker}")
@@ -942,7 +1038,7 @@ if speaker =~ /^([0-9]+)/ then
   server_type = "voicevox"
   speaker = $1.to_i
   # VOICEVOX ENGINEが指定されていなかったら
-  if VOICEVOX_ENGINE == [] then
+  if @voicevox_engines == [] then
     STDERR.print "VOICEVOX ENGINEが設定されていないため、SpeakerID \"#{speaker}\" は指定できません\n"
     exit 1
   end
@@ -956,7 +1052,7 @@ elsif speaker =~ /^c([0-9]+)/ then
   server_type = "coeiroink"
   speaker = $1.to_i
   # COEIROINK ENGINEが指定されていなかったら
-  if COEIROINK_ENGINE == [] then
+  if @coeiroink_engines == [] then
     STDERR.print "COEIROINK ENGINEが設定されていないため、SpeakerID \"c#{speaker}\" は指定できません\n"
     exit 1
   end
@@ -1665,7 +1761,7 @@ vv_thread_text = Array.new
 # VOICEVOXスレッドが使用中のサーバ(エンジン)のインデックスを格納する配列
 vv_thread_server = Array.new
 # VOICEVOXの使用されていないサーバ(エンジン)を格納する配列
-vv_unuse_server = VOICEVOX_ENGINE.dup
+vv_unuse_server = @voicevox_engines.dup
 
 # どのスレッドに割り当てるかを決める変数
 i = 0
@@ -1674,20 +1770,20 @@ i = 0
 voicevox_input_text.each{|key,value|
 
   # まだ変換すべき文字列と割り当てるサーバ(エンジン)が残っていれば
-  if 0 < voicevox_input_text.length and i < VOICEVOX_ENGINE.length then
+  if 0 < voicevox_input_text.length and i < @voicevox_engines.length then
 
     # スレッドが処理中のキー、テキストにセット
     vv_thread_key[i] = key
     vv_thread_text[i] = value
 
     # 未使用サーバから割り当てるサーバ(エンジン)を削除
-    vv_unuse_server.delete(VOICEVOX_ENGINE[i])
+    vv_unuse_server.delete(@voicevox_engines[i])
 
     # スレッドが使用中のサーバ(エンジン)をセット
-    vv_thread_server[i] = VOICEVOX_ENGINE[i]
+    vv_thread_server[i] = @voicevox_engines[i]
 
     # スレッドに渡す用の一時的変数
-    server_temp = VOICEVOX_ENGINE[i]
+    server_temp = @voicevox_engines[i]
 
     # voicevox_input_textから取り除く
     voicevox_input_text.delete(key)
@@ -1728,7 +1824,7 @@ ci_thread_text = Array.new
 # COEIROINKスレッドが使用中のサーバ(エンジン)のインデックスを格納する配列
 ci_thread_server = Array.new
 # COEIROINKの使用されていないサーバ(エンジン)を格納する配列
-ci_unuse_server = COEIROINK_ENGINE.dup
+ci_unuse_server = @coeiroink_engines.dup
 
 # どのスレッドに割り当てるかを決める変数
 i = 0
@@ -1737,20 +1833,20 @@ i = 0
 coeiroink_input_text.each{|key,value|
 
   # まだ変換すべき文字列と割り当てるサーバ(エンジン)が残っていれば
-  if 0 < coeiroink_input_text.length and i < COEIROINK_ENGINE.length then
+  if 0 < coeiroink_input_text.length and i < @coeiroink_engines.length then
 
     # スレッドが処理中のキー、テキストにセット
     ci_thread_key[i] = key
     ci_thread_text[i] = value
 
     # 未使用サーバから割り当てるサーバ(エンジン)を削除
-    ci_unuse_server.delete(COEIROINK_ENGINE[i])
+    ci_unuse_server.delete(@coeiroink_engines[i])
 
     # スレッドが使用中のサーバ(エンジン)をセット
-    ci_thread_server[i] = COEIROINK_ENGINE[i]
+    ci_thread_server[i] = @coeiroink_engines[i]
 
     # スレッドに渡す用の一時的変数
-    server_temp = COEIROINK_ENGINE[i]
+    server_temp = @coeiroink_engines[i]
 
     # voicevox_input_textから取り除く
     coeiroink_input_text.delete(key)

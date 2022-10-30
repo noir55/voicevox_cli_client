@@ -883,9 +883,9 @@ if (not VOICEVOX_ENGINE.nil?) and VOICEVOX_ENGINE.length > 0 then
   }
   if @voicevox_engines.length == 0 then
     if quiet_flag == 0 then
-      STDERR.print "全ての VOICEVOX ENGINEが除外されました\n"
+      STDERR.print "全てのVOICEVOX ENGINEが除外されました\n"
     end
-    debug_print("全ての VOICEVOX ENGINEが除外されました")
+    debug_print("全てのVOICEVOX ENGINEが除外されました")
   end
 else
   @voicevox_engines = []
@@ -930,9 +930,9 @@ if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then
   }
   if @coeiroink_engines.length == 0 then
     if quiet_flag == 0 then
-      STDERR.print "全ての COEIROINK ENGINEが除外されました\n"
+      STDERR.print "全てのCOEIROINK ENGINEが除外されました\n"
     end
-    debug_print("全ての COEIROINK ENGINEが除外されました")
+    debug_print("全てのCOEIROINK ENGINEが除外されました")
   end
 else
   @coeiroink_engines = []

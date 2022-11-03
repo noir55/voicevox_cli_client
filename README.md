@@ -10,9 +10,9 @@ VOICEVOX ENGINEまたは、COEIROINK ENGINEを利用して、テキストを音�
 
 また、テキスト内の文章の先頭に決まった書式で記述することで、その部分以降の読み上げパラメータ(音声種別や速度など)を変更することができます。
 
-複数のVOICEVOX ENGINEを設定することで、並列で音声変換が実行できます。(句点、改行、？ で文章を区切り、文章ごとに音声変換処理を実行します)
+複数のVOICEVOX ENGINE、COEIROINK ENGINEを設定することで、並列で音声変換が実行できます。(句点、改行、？ で文章を区切り、文章ごとに音声変換処理を実行します)
 
-VOICEVOX ENGINEのユーザ辞書に対し、単語の追加、編集、削除、ファイルからの一括登録などができます。
+VOICEVOX ENGINE、COEIROINK ENGINEのユーザ辞書に対し、単語の追加、編集、削除、ファイルからの一括登録などができます。
 
 # 動作要件
 
@@ -243,7 +243,7 @@ $ vvdict rereg list.txt
 
 ## CMU Pronoucing Dictionary を使用した英語のカナ読み上げ
 
-`--cmudict` オプションを付けることで [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict) (Copyright (C) 1993-2015 Carnegie Mellon University. All rights reserved.) を使用した英語のカタカナ変換を行うことができます。本機能は [english_to_kana](https://github.com/morikatron/snippet/tree/master/english_to_kana) のサンプルコードを基に Ruby で再実装したうえで少し改良しています。短めの英単語は VOICEVOX の方が自然に読み上げてくれることが多い印象のため、4 文字以上の英単語について本機能が適用されます。
+`--cmudict` オプションを付けることで [CMU Pronouncing Dictionary](https://github.com/cmusphinx/cmudict) (Copyright (C) 1993-2015 Carnegie Mellon University. All rights reserved.) を使用した英語のカタカナ変換を行うことができます。本機能は [english_to_kana](https://github.com/morikatron/snippet/tree/master/english_to_kana) のサンプルコードを基に Ruby で再実装したうえで少し改良(?)しています。短めの英単語は VOICEVOX の方が自然に読み上げてくれることが多い印象のため、4 文字以上の英単語について本機能が適用されます。
 
 # その他
 

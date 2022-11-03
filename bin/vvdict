@@ -12,11 +12,24 @@ VERSION="1.1.0"
 # 設定
 #------
 
+# デフォルトの設定ファイル
+config_file_path = "#{File.dirname(__dir__)}/etc/config.rb"
+
+# 設定ファイルがオプションで指定されていたら上書き
+if ARGV[0] =~ /^(-c|--config)$/ then
+  ARGV.shift
+  config_file_path = ARGV.shift
+elsif ARGV[0] =~ /^--config=(.*)$/ then
+  config_file_path = $1
+  ARGV.shift
+end
+
+
 # 設定ファイルを読み込む
-if File.exist?("#{__dir__}/../etc/config.rb")
-  require_relative '../etc/config.rb'
+if File.exist?(config_file_path)
+  require_relative "#{config_file_path}"
 else
-  STDOUT.print "設定ファイル \"#{__dir__}/../etc/config.rb\" が見つかりません"
+  STDOUT.print "設定ファイル \"#{config_file_path}\" が見つかりません"
   exit 1
 end
 
@@ -248,15 +261,15 @@ end
 # デバッグモードを使用するかどうかを格納する変数
 @debug_flag = 0
 
-# VOICEVOX ENGINEの重複を取り除く
-@engines = VOICEVOX_ENGINE.uniq
+# VOICEVOX ENGINE、COEIROINK ENGINEの重複を取り除く
+@engines = VOICEVOX_ENGINE.uniq + COEIROINK_ENGINE.uniq
 
 # 動作モードを格納する変数
 mode = ""
 
 # 引数がなかったらエラー
 if ARGV.length < 1 then
-  STDERR.print "Usage: #{__FILE__} show|add|del|listadd|deleteall|rereg [options] \n"
+  STDERR.print "Usage: #{__FILE__} [-c CONFIG_FILE] show|add|del|listadd|deleteall|rereg [options] \n"
   exit 1
 end
 
@@ -275,6 +288,7 @@ options.each{|value|
   if value == "--debug" then
     @debug_flag = 1
     debug_print("debug mode on")
+    debug_print("@engines=#{@engines}")
     options.delete("--debug")
   end
 }
@@ -344,6 +358,8 @@ if mode == "show" then
     print_data.sort.each{|value|
       print "#{value}\n"
     }
+  else
+    STDERR.print "辞書に登録されている単語はありません\n"
   end
 
 

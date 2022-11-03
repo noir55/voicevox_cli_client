@@ -88,7 +88,7 @@ end
 
 
 # エンジンで指定可能なSpeakerID一覧を取得する関数
-def get_available_speakerid(server)
+def get_available_speakerid(server, mode='get', type='voicevox')
   uri = URI.parse("http://#{server}/speakers")
   http = Net::HTTP.new(uri.host, uri.port)
   res = nil
@@ -112,13 +112,39 @@ def get_available_speakerid(server)
     # JSONをハッシュに変換
     debug_print("speakers=#{res.body}")
     speaker_data = JSON.parse(res.body)
-    speaker_data.each{|data|
-      data['styles'].each{|style|
-        speaker_ids << style['id']
+    # modeがgetだったら取得したSpeaker IDを配列で返す
+    if mode == 'get' then
+      speaker_data.each{|data|
+        data['styles'].each{|style|
+          speaker_ids << style['id']
+        }
       }
-    }
-    # 指定可能なSpeakerID一覧を配列で返す
-    return speaker_ids.sort
+      # 指定可能なSpeakerID一覧を配列で返す
+      return speaker_ids.sort
+    # modeがprintだったら取得した情報を表示する
+    elsif
+      speaker_info = Hash.new
+      speaker_data.each{|data|
+        if speaker_info[data['name']].nil? then
+          speaker_info[data['name']] = Hash.new
+        end
+        data['styles'].each{|style|
+          speaker_info[data['name']][style['id']] = style['name']
+        }
+      }
+      speaker_info.each{|name,value|
+        STDERR.print "#{name}\n"
+        value.sort.each{|id,st|
+          if type == 'coeiroink' then
+            temp = "c#{id}"
+            STDERR.print "    #{sprintf("%8s",temp)}  #{st}\n"
+          else
+            STDERR.print "    #{sprintf("%8d",id)}  #{st}\n"
+          end
+        }
+        STDERR.print "\n"
+      }
+    end
   # サーバからデータが返ってこなかったら
   else
     debug_print("voicevox engineで利用可能なSpeakerIDを取得できません")
@@ -737,6 +763,9 @@ verbous_flag = 0
 # サーバのチェックを行うフラグ
 check_flag = 0
 
+# 利用可能なSpeakerID一覧を表示するフラグ
+list_flag = 0
+
 # CMU 発音辞書を使用するフラグ
 cmudict_flag = 0
 
@@ -759,7 +788,7 @@ opt.on('-f', '--file TEXT_FILE', 'テキストファイルの内容を音声変�
 opt.on('-o', '--output FILENAME_PREFIX', '出力ファイル名を指定します (拡張子は不要)') {|v| output_filename = v }
 opt.on('-1', '--single', 'テキスト全体を1つのファイルに出力します') {|v| single_output_flag = 1 }
 opt.on('-p', '--play', 'ファイルに出力せず、全ての音声変換後に読み上げを行います') {|v| play_flag = 1 }
-opt.on('-s', '--speaker NUMBER', "声の種類を指定します (<数字>、c<数字> または r") {|v| speaker = v }
+opt.on('-s', '--speaker NUMBER', "声の種類(Speaker ID)を指定します (<数字>、c<数字> または r)") {|v| speaker = v }
 opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (<数字> または c<数字>}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
 opt.on('--query NUMBER', "クエリ時の声の種類を指定します (<数字> または c<数字>)") {|v| query_speaker = v }
 opt.on('-i', '--interval INTERVAL_SECOND', '文章間の時間を指定します (秒)'){|v| interval_time = v.to_f }
@@ -782,6 +811,7 @@ opt.on('--volume VOLUME_SCALE', 'ボリュームスケールを指定します (
 opt.on('--cmudict', 'CMU Pronouncing Dictionaryを使用して英語をカナ読みする'){|v| cmudict_flag = 1 }
 opt.on('--debug', 'デバッグメッセージを出力します') {|v| @debug_flag = 1 }
 opt.on('--check', 'エンジンの状態をチェックします') {|v| check_flag = 1 }
+opt.on('--list', '利用可能なSpeaker ID一覧を表示します') {|v| list_flag = 1 }
 opt.on('--version', 'バージョンを出力します') {|v| print "#{VERSION}\n" ; exit }
 opt.parse!(ARGV)
 
@@ -959,6 +989,21 @@ if (not @voicevox_engines.nil?) and @voicevox_engines.length > 0 then
   else
     STDERR.print "voicevox engineのバージョン番号を取得できません\n"
     exit 1
+  end
+
+  # 利用可能なSpeaker ID一覧表示を行う場合
+  if list_flag == 1 then
+    # 利用可能なVOICEVOX ENGINEがあれば
+    if @voicevox_engines.length > 0 then
+      debug_print("利用可能なVOICEVOXのSpeaker IDをチェックします")
+      get_available_speakerid(@voicevox_engines[0], 'print', 'voicevox')
+    end
+    # 利用可能なCOEIROINK ENGINEがあれば
+    if @coeiroink_engines.length > 0 then
+      debug_print("利用可能なCOEIROINKのSpeaker IDをチェックします")
+      get_available_speakerid(@coeiroink_engines[0], 'print', 'coeiroink')
+    end
+    exit
   end
 
   # VOICEVOX ENGINEのバージョンからSpeakerIDの最大値を求める

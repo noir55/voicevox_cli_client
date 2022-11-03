@@ -1,6 +1,6 @@
 # VOICEVOX CLI Client
 
-[VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine)、COEIROINK ENGINE用のコマンドラインツールです。
+[VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine)、[COEIROINK ENGINE](https://coeiroink.com/)用のコマンドラインツールです。
 
 # 機能
 
@@ -26,7 +26,7 @@ VOICEVOX ENGINEはDockerを使用して起動するのが簡単だと思いま�
 # docker run -d --restart=always --network=host --name=voicevox voicevox/voicevox_engine:cpu-ubuntu20.04-0.13.2
 ```
 
-COEIROINKサーバはLinux版がありません。Windows版の場合、コマンドプロンプトで以下のように実行することで起動できます。IPアドレスは、Windowsマシンに割り当てたものを指定してください。wineを使用してLinux上でWindows版を起動することもできるようです。
+COEIROINKはLinux版がありません。Windows版の場合、コマンドプロンプトで以下のように実行することで起動できます。IPアドレスは、Windowsマシンに割り当てたものを指定してください。wineを使用してLinux上でWindows版を起動することもできるようです。
 
 ```
 C:\COEIROINK-CPU-v.1.6.0> run.exe --host 192.168.0.21

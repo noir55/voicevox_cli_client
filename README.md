@@ -1,6 +1,6 @@
 # VOICEVOX CLI Client
 
-[VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine)、[COEIROINK ENGINE](https://coeiroink.com/)用のコマンドラインツールです。
+[VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine)、[COEIROINK](https://coeiroink.com/)用のコマンドラインツールです。
 
 # 機能
 

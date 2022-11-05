@@ -224,6 +224,9 @@ catch :loop do
       debug_print("stop play thread (J=#{json_array.length} V=#{voice_array.length})")
     end
 
+    # メモリ開放
+    GC.start
+
   end
 end
 

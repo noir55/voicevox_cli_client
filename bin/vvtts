@@ -841,7 +841,24 @@ if check_flag == 1 then
         debug_print("VOICEVOX ENGINE \"#{server}\" 接続時にエラーが発生しました(#{e.message})")
         res = nil
       end
-      if (not res.nil?) and res.body =~ /^\"[0-9]+\.[0-9]+\.[0-9]+\"$/ then
+      if (not res.nil?) and res.body =~ /^\"([0-9]+)\.([0-9]+)\.([0-9]+)\"$/ then
+        maj_version = $1.to_i
+        min_version = $2.to_i
+        revision = $3.to_i
+        # VOICEVOX ENGINEのバージョンからSpeakerIDの最大値を求める
+        VERSION_TO_MAX_SPEAKER_ID.each{|version,maxspeakerid|
+          if version =~ /^([0-9]+)\.([0-9]+)\.([0-9]+)$/ then
+            maj = $1.to_i
+            min = $2.to_i
+            rev = $3.to_i
+            if maj_version >= maj and min_version >= min and revision >= rev then
+              @max_speaker_id = VERSION_TO_MAX_SPEAKER_ID[version]
+            end
+          else
+            STDERR.print "VERSION_TO_MAX_SPEAKER_IDのバージョン指定が正しくありません\n"
+            exit 1
+          end
+        }
         print "voicevox engine=#{server} version=#{res.body.chomp} max_speaker_id=#{@max_speaker_id} status=OK\n"
       else
         print "voicevox engine=#{server} status=NG\n"

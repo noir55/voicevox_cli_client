@@ -851,7 +851,7 @@ if check_flag == 1 then
             maj = $1.to_i
             min = $2.to_i
             rev = $3.to_i
-            if maj_version >= maj and min_version >= min and revision >= rev then
+            if (maj_version > maj) or (maj_version == maj and min_version > min) or (maj_version == maj and min_version == min and revision >= rev) then
               @max_speaker_id = VERSION_TO_MAX_SPEAKER_ID[version]
             end
           else

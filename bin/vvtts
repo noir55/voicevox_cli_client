@@ -19,7 +19,7 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.3.4"
+VERSION="1.4.0"
 
 
 #------
@@ -121,13 +121,18 @@ def get_available_speakerid(server, mode='get', type='voicevox')
     if mode == 'get' then
       speaker_data.each{|data|
         data['styles'].each{|style|
-          speaker_ids << style['id']
+          # VOICEVOX NEMOの場合は10000を引いたIDを返す
+          if type == "voicevox_nemo" then
+            speaker_ids << style['id'].to_i - 10000
+          else
+            speaker_ids << style['id']
+          end
         }
       }
       # 指定可能なSpeakerID一覧を配列で返す
       return speaker_ids.sort
     # modeがprintだったら取得した情報を表示する
-    elsif
+    else
       speaker_info = Hash.new
       speaker_data.each{|data|
         if speaker_info[data['name']].nil? then
@@ -140,7 +145,10 @@ def get_available_speakerid(server, mode='get', type='voicevox')
       speaker_info.each{|name,value|
         STDERR.print "#{name}\n"
         value.sort.each{|id,st|
-          if type == 'coeiroink' then
+          if type == 'voicevox_nemo' then
+            temp = "n#{id - 10000}"
+            STDERR.print "    #{sprintf("%8s",temp)}  #{st}\n"
+          elsif type == 'coeiroink' then
             temp = "c#{id}"
             STDERR.print "    #{sprintf("%8s",temp)}  #{st}\n"
           else
@@ -168,6 +176,15 @@ def text2wav(type, server, text, speaker, query_speaker, param_speed, param_pitc
     if query_speaker != "" and ( query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i ) then
       STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
     end
+  elsif type == "voicevox_nemo" then
+    # speakerの値チェック
+    if not @voicevox_nemo_available_speakers.include?(speaker) then
+      STDERR.print "speaker の値が正しくありません (\"#{speaker}\")\n"
+    end
+    # query_speakerの値チェック
+    if query_speaker != "" and (not @voicevox_nemo_available_speakers.include?(query_speaker)) then
+      STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
+    end
   elsif type == "coeiroink" then
     # speakerの値チェック
     if not @coeiroink_available_speakers.include?(speaker) then
@@ -183,15 +200,29 @@ def text2wav(type, server, text, speaker, query_speaker, param_speed, param_pitc
   # デバッグメッセージ
   debug_print("enc_text=#{enc_text}")
   if query_speaker == "" then
-    # デバッグメッセージ
-    debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker}\"")
-    # JSON取得のためのURLをセット
-    uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker}")
+    if type == "voicevox_nemo" then
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker.to_i + 10000}\"")
+      # JSON取得のためのURLをセット
+      uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker.to_i + 10000}")
+    else
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker}\"")
+      # JSON取得のためのURLをセット
+      uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{speaker}")
+    end
   else
-    # デバッグメッセージ
-    debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}\"")
-    # JSON取得のためのURLをセット
-    uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}")
+    if type == "voicevox_nemo" then
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker.to_i + 10000}\"")
+      # JSON取得のためのURLをセット
+      uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker.to_i + 10000}")
+    else
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}\"")
+      # JSON取得のためのURLをセット
+      uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}")
+    end
   end
   # JSONの取得
   res = Net::HTTP.post_form(uri, 'body' => nil)
@@ -211,6 +242,19 @@ def text2wav(type, server, text, speaker, query_speaker, param_speed, param_pitc
         param_intonation = sprintf("%0.2f", param_intonation.to_f * VOICEVOX_CORRECT_MATRIX[speaker.to_s][2] )
         # 音量補正
         param_volume = sprintf("%0.2f", param_volume.to_f * VOICEVOX_CORRECT_MATRIX[speaker.to_s][3] )
+      end
+    # VOICEVOX NEMOの場合の補正
+    elsif type == "voicevox_nemo" then
+      # 設定ファイルで補正設定があれば
+      if VOICEVOX_NEMO_CORRECT_MATRIX.key?(speaker.to_s) then
+        # 話速補正
+        param_speed = sprintf("%0.2f", param_speed.to_f * VOICEVOX_NEMO_CORRECT_MATRIX[speaker.to_s][0] )
+        # ピッチ補正
+        param_pitch = sprintf("%0.2f", param_pitch.to_f + VOICEVOX_NEMO_CORRECT_MATRIX[speaker.to_s][1] )
+        # イントネーション補正
+        param_intonation = sprintf("%0.2f", param_intonation.to_f * VOICEVOX_NEMO_CORRECT_MATRIX[speaker.to_s][2] )
+        # 音量補正
+        param_volume = sprintf("%0.2f", param_volume.to_f * VOICEVOX_NEMO_CORRECT_MATRIX[speaker.to_s][3] )
       end
     # COEIROINKの場合の補正
     elsif type == "coeiroink" then
@@ -249,10 +293,17 @@ def text2wav(type, server, text, speaker, query_speaker, param_speed, param_pitc
     uri = URI.parse("http://#{server}/")
     http = Net::HTTP.new(uri.host, uri.port)
     http.read_timeout = HTTP_TIMEOUT
-    # デバッグメッセージ
-    debug_print("URI=\"http://#{server}/synthesis?speaker=#{speaker}\"")
-    # 音声データを取得
-    voice = http.post("/synthesis?speaker=#{speaker}", res.body, headers)
+    if type == "voicevox_nemo" then
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/synthesis?speaker=#{speaker.to_i + 10000}\"")
+      # 音声データを取得
+      voice = http.post("/synthesis?speaker=#{speaker.to_i + 10000}", res.body, headers)
+    else
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/synthesis?speaker=#{speaker}\"")
+      # 音声データを取得
+      voice = http.post("/synthesis?speaker=#{speaker}", res.body, headers)
+    end
     # デバッグメッセージ
     debug_print("リターンコード=#{voice.code} データサイズ=#{voice.body.size}")
     # 音声データ変換に成功したら
@@ -290,6 +341,19 @@ def text2wav_morph(type, server, text, base_speaker, target_speaker, morph_rate,
     if query_speaker != "" and ( query_speaker.to_i < 0 or @max_speaker_id < query_speaker.to_i ) then
       STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
     end
+  elsif type == "voicevox_nemo" then
+    # base_speakerの値チェック
+    if not @voicevox_nemo_available_speakers.include?(base_speaker) then
+      STDERR.print "base_speaker の値が正しくありません (\"#{base_speaker}\")\n"
+    end
+    # target_speakerの値チェック
+    if not @voicevox_nemo_available_speakers.include?(target_speaker) then
+      STDERR.print "target_speaker の値が正しくありません (\"#{target_speaker}\")\n"
+    end
+    # query_speakerの値チェック
+    if query_speaker != "" and (not @voicevox_nemo_available_speakers.include?(query_speaker)) then
+      STDERR.print "query_speaker の値が正しくありません (\"#{query_speaker}\")\n"
+    end
   elsif type == "coeiroink" then
     # base_speakerの値チェック
     if not @coeiroink_available_speakers.include?(base_speaker) then
@@ -309,15 +373,29 @@ def text2wav_morph(type, server, text, base_speaker, target_speaker, morph_rate,
   # デバッグメッセージ
   debug_print("enc_text=#{enc_text}")
   if query_speaker == "" then
-    # デバッグメッセージ
-    debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker}\"")
-    # JSON取得のためのURLをセット
-    uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker}")
+    if type == "voicevox_nemo" then
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker.to_i + 10000}\"")
+      # JSON取得のためのURLをセット
+      uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker.to_i + 10000}")
+    else
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker}\"")
+      # JSON取得のためのURLをセット
+      uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{base_speaker}")
+    end
   else
-    # デバッグメッセージ
-    debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}\"")
-    # JSON取得のためのURLをセット
-    uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}")
+    if type == "voicevox_nemo" then
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker.to_i + 10000}\"")
+      # JSON取得のためのURLをセット
+      uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker.to_i + 10000}")
+    else
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}\"")
+      # JSON取得のためのURLをセット
+      uri = URI("http://#{server}/audio_query?text=#{enc_text}&speaker=#{query_speaker}")
+    end
   end
   # JSONの取得
   res = Net::HTTP.post_form(uri, 'body' => nil)
@@ -337,6 +415,19 @@ def text2wav_morph(type, server, text, base_speaker, target_speaker, morph_rate,
         param_intonation = sprintf("%0.2f", param_intonation.to_f * ( (VOICEVOX_CORRECT_MATRIX[base_speaker.to_s][2] * (1.0 - morph_rate.to_f)) + (VOICEVOX_CORRECT_MATRIX[target_speaker.to_s][2] * morph_rate.to_f) ) )
         # 音声補正
         param_volume = sprintf("%0.2f", param_volume.to_f * ( (VOICEVOX_CORRECT_MATRIX[base_speaker.to_s][3] * (1.0 - morph_rate.to_f)) + (VOICEVOX_CORRECT_MATRIX[target_speaker.to_s][3] * morph_rate.to_f) ) )
+      end
+    # VOICEVOX NEMOの場合の補正
+    elsif type == "voicevox_nemo" then
+      # 設定ファイルで補正設定があれば
+      if VOICEVOX_NEMO_CORRECT_MATRIX.key?(base_speaker.to_s) and VOICEVOX_NEMO_CORRECT_MATRIX.key?(target_speaker.to_s) then
+        # 話速補正
+        param_speed = sprintf("%0.2f", param_speed.to_f * ( (VOICEVOX_NEMO_CORRECT_MATRIX[base_speaker.to_s][0] * (1.0 - morph_rate.to_f)) + (VOICEVOX_NEMO_CORRECT_MATRIX[target_speaker.to_s][0] * morph_rate.to_f) ) )
+        # ピッチ補正
+        param_pitch = sprintf("%0.2f", param_pitch.to_f + ( (VOICEVOX_NEMO_CORRECT_MATRIX[base_speaker.to_s][1] * (1.0 - morph_rate.to_f)) + (VOICEVOX_NEMO_CORRECT_MATRIX[target_speaker.to_s][1] * morph_rate.to_f) ) )
+        # イントネーション補正
+        param_intonation = sprintf("%0.2f", param_intonation.to_f * ( (VOICEVOX_NEMO_CORRECT_MATRIX[base_speaker.to_s][2] * (1.0 - morph_rate.to_f)) + (VOICEVOX_NEMO_CORRECT_MATRIX[target_speaker.to_s][2] * morph_rate.to_f) ) )
+        # 音声補正
+        param_volume = sprintf("%0.2f", param_volume.to_f * ( (VOICEVOX_NEMO_CORRECT_MATRIX[base_speaker.to_s][3] * (1.0 - morph_rate.to_f)) + (VOICEVOX_NEMO_CORRECT_MATRIX[target_speaker.to_s][3] * morph_rate.to_f) ) )
       end
     # COEIROINKの場合の補正
     elsif type == "coeiroink" then
@@ -375,10 +466,17 @@ def text2wav_morph(type, server, text, base_speaker, target_speaker, morph_rate,
     uri = URI.parse("http://#{server}/")
     http = Net::HTTP.new(uri.host, uri.port)
     http.read_timeout = HTTP_TIMEOUT
-    # デバッグメッセージ
-    debug_print("URI=\"http://#{server}/synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}\"")
-    # 音声データを取得
-    voice = http.post("/synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}", res.body, headers)
+    if type == "voicevox_nemo" then
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/synthesis_morphing?base_speaker=#{base_speaker.to_i + 10000}&target_speaker=#{target_speaker.to_i + 10000}&morph_rate=#{morph_rate}\"")
+      # 音声データを取得
+      voice = http.post("/synthesis_morphing?base_speaker=#{base_speaker.to_i + 10000}&target_speaker=#{target_speaker.to_i + 10000}&morph_rate=#{morph_rate}", res.body, headers)
+    else
+      # デバッグメッセージ
+      debug_print("URI=\"http://#{server}/synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}\"")
+      # 音声データを取得
+      voice = http.post("/synthesis_morphing?base_speaker=#{base_speaker}&target_speaker=#{target_speaker}&morph_rate=#{morph_rate}", res.body, headers)
+    end
     # デバッグメッセージ
     debug_print("リターンコード=#{voice.code} データサイズ=#{voice.body.size}")
     # 音声データ変換に成功したら
@@ -739,6 +837,7 @@ param_volume = 1.0
 
 # 出力する音声ファイルのサンプルレート
 voicevox_sample_rate = 24000
+voicevox_nemo_sample_rate = 24000
 coeiroink_sample_rate = 44100
 
 # 入力ファイルを格納する変数
@@ -783,6 +882,9 @@ single_output_flag = 0
 # VOICEVOXで指定できるSpeakerIDの最大値
 @max_speaker_id = 0
 
+# VOICEVOX NEMOで指定できるSpeakerIDの一覧を格納する配列
+@voicevox_nemo_available_speakers = Array.new
+
 # COEIROINKで指定できるSpeakerIDの一覧を格納する配列
 @coeiroink_available_speakers = Array.new
 
@@ -793,9 +895,9 @@ opt.on('-f', '--file TEXT_FILE', 'テキストファイルの内容を音声変�
 opt.on('-o', '--output FILENAME_PREFIX', '出力ファイル名を指定します (拡張子は不要)') {|v| output_filename = v }
 opt.on('-1', '--single', 'テキスト全体を1つのファイルに出力します') {|v| single_output_flag = 1 }
 opt.on('-p', '--play', 'ファイルに出力せず、全ての音声変換後に読み上げを行います') {|v| play_flag = 1 }
-opt.on('-s', '--speaker NUMBER', "声の種類(Speaker ID)を指定します (<数字>、c<数字> または r)") {|v| speaker = v }
-opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (<数字> または c<数字>}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
-opt.on('--query NUMBER', "クエリ時の声の種類を指定します (<数字> または c<数字>)") {|v| query_speaker = v }
+opt.on('-s', '--speaker NUMBER', "声の種類(Speaker ID)を指定します (<数字>、n<数字>, c<数字> または r)") {|v| speaker = v }
+opt.on('-m', '--morph_speaker NUMBER,RATE', "モーフィング先の声の種類 (<数字>、n<数字> または c<数字>}) と、モーフィング率 (0.1-0.9) を指定します") {|v| morph_speaker,morph_rate=v.split(",") }
+opt.on('--query NUMBER', "クエリ時の声の種類を指定します (<数字>、n<数字> または c<数字>)") {|v| query_speaker = v }
 opt.on('-i', '--interval INTERVAL_SECOND', '文章間の時間を指定します (秒)'){|v| interval_time = v.to_f }
 opt.on('-I', '--paragraph-interval INTERVAL_SECOND', '文節間の時間を指定します (秒)'){|v| paragraph_interval_time = v.to_f }
 opt.on('-q', '--quiet', '標準出力に何も表示しません') {|v| quiet_flag = 1 }
@@ -869,6 +971,29 @@ if check_flag == 1 then
       end
     }
   end
+  # VOICEVOX NEMO ENGINEの指定があれば、指定可能なSpeakerID一覧を求める
+  if (not VOICEVOX_NEMO_ENGINE.nil?) and VOICEVOX_NEMO_ENGINE.length > 0 then 
+    VOICEVOX_NEMO_ENGINE.each{|server|
+      uri = URI.parse("http://#{server}/version")
+      http = Net::HTTP.new(uri.host, uri.port)
+      res = nil
+      begin
+        Timeout.timeout(5){
+          res = http.get(uri)
+        }
+      rescue => e
+        debug_print("VOICEVOX NEMO ENGINE \"#{server}\" 接続時にエラーが発生しました(#{e.message})")
+        res = nil
+      end
+      if (not res.nil?) then
+        @voicevox_nemo_available_speakers = get_available_speakerid(VOICEVOX_NEMO_ENGINE[0], mode="get", type="voicevox_nemo")
+        debug_print("server=#{server} voicevox_nemo_available_speakers=#{@voicevox_nemo_available_speakers}")
+        print "voicevox nemo engine=#{server} version=#{res.body.chomp} enable_speaker_id=#{@voicevox_nemo_available_speakers} status=OK\n"
+      else
+        print "voicevox nemo engine=#{server} status=NG\n"
+      end
+    }
+  end
   # COEIROINK ENGINEの指定があれば、指定可能なSpeakerID一覧を求める
   if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then 
     COEIROINK_ENGINE.each{|server|
@@ -884,7 +1009,7 @@ if check_flag == 1 then
         res = nil
       end
       if (not res.nil?) then
-        @coeiroink_available_speakers = get_available_speakerid(COEIROINK_ENGINE[0])
+        @coeiroink_available_speakers = get_available_speakerid(COEIROINK_ENGINE[0], mode="get", type="coeiroink")
         debug_print("server=#{server} coeiroink_available_speakers=#{@coeiroink_available_speakers}")
         print "coeiroink engine=#{server} version=#{res.body.chomp} enable_speaker_id=#{@coeiroink_available_speakers} status=OK\n"
       else
@@ -944,6 +1069,53 @@ else
 end
 debug_print("@voicevox_engines=#{@voicevox_engines}")
 
+# 設定されたVOICEVOX NEMO ENGINEのうち使えるものをチェック
+if (not VOICEVOX_NEMO_ENGINE.nil?) and VOICEVOX_NEMO_ENGINE.length > 0 then
+  chk_thread = Array.new
+  VOICEVOX_NEMO_ENGINE.each_with_index{|engine,index|
+    # スレッドで各サーバをチェック
+    chk_thread[index]=Thread.new{
+      uri = URI.parse("http://#{engine}/version")
+      http = Net::HTTP.new(uri.host, uri.port)
+      res = nil
+      begin
+        Timeout.timeout(5){
+          res = http.get(uri)
+        }
+      rescue => e
+        debug_print("VOICEVOX NEMO ENGINE \"#{engine}\" 接続時にエラーが発生しました(#{e.message})")
+        nil
+      end
+      if (not res.nil?) and res.code == "200" then
+        # VOICEVOX NEMO ENGINEのホスト、ポートを返す
+        engine
+      else
+        if quiet_flag == 0 then
+          STDERR.print "VOICEVOX NEMO ENGINE \"#{engine}\" は使用できないため除外します\n"
+        end
+        debug_print("VOICEVOX NEMO ENGINE \"#{engine}\" は使用できないため除外します")
+        nil
+      end
+    }  
+  }
+  chk_thread.each {|thr| thr.join }
+  @voicevox_nemo_engines = Array.new
+  chk_thread.each{|thr|
+    if not thr.value.nil? then
+      @voicevox_nemo_engines << thr.value
+    end
+  }
+  if @voicevox_nemo_engines.length == 0 then
+    if quiet_flag == 0 then
+      STDERR.print "全てのVOICEVOX NEMO ENGINEが除外されました\n"
+    end
+    debug_print("全てのVOICEVOX NEMO ENGINEが除外されました")
+  end
+else
+  @voicevox_nemo_engines = []
+end
+debug_print("@voicevox_nemo_engines=#{@voicevox_nemo_engines}")
+
 # 設定されたCOEIROINK ENGINEのうち使えるものをチェック
 if (not COEIROINK_ENGINE.nil?) and COEIROINK_ENGINE.length > 0 then
   chk_thread = Array.new
@@ -991,6 +1163,27 @@ else
 end
 debug_print("@coeiroink_engines=#{@coeiroink_engines}")
 
+# 利用可能なSpeaker ID一覧表示を行う場合
+if list_flag == 1 then
+  # 利用可能なVOICEVOX ENGINEがあれば
+  if @voicevox_engines.length > 0 then
+    debug_print("利用可能なVOICEVOXのSpeaker IDをチェックします")
+    get_available_speakerid(@voicevox_engines[0], 'print', 'voicevox')
+  end
+  # 利用可能なVOICEVOX NEMO ENGINEがあれば
+  if @voicevox_nemo_engines.length > 0 then
+    debug_print("利用可能なVOICEVOX NEMOのSpeaker IDをチェックします")
+    get_available_speakerid(@voicevox_nemo_engines[0], 'print', 'voicevox_nemo')
+  end
+  # 利用可能なCOEIROINK ENGINEがあれば
+  if @coeiroink_engines.length > 0 then
+    debug_print("利用可能なCOEIROINKのSpeaker IDをチェックします")
+    get_available_speakerid(@coeiroink_engines[0], 'print', 'coeiroink')
+  end
+  exit
+end
+
+
 # 設定ファイルで指定された中で使用可能なVOICEVOX ENGINEがあれば
 if (not @voicevox_engines.nil?) and @voicevox_engines.length > 0 then
   # 最初のVOICEVOX ENGINEからバージョン番号を取得
@@ -1011,21 +1204,6 @@ if (not @voicevox_engines.nil?) and @voicevox_engines.length > 0 then
   else
     STDERR.print "voicevox engineのバージョン番号を取得できません\n"
     exit 1
-  end
-
-  # 利用可能なSpeaker ID一覧表示を行う場合
-  if list_flag == 1 then
-    # 利用可能なVOICEVOX ENGINEがあれば
-    if @voicevox_engines.length > 0 then
-      debug_print("利用可能なVOICEVOXのSpeaker IDをチェックします")
-      get_available_speakerid(@voicevox_engines[0], 'print', 'voicevox')
-    end
-    # 利用可能なCOEIROINK ENGINEがあれば
-    if @coeiroink_engines.length > 0 then
-      debug_print("利用可能なCOEIROINKのSpeaker IDをチェックします")
-      get_available_speakerid(@coeiroink_engines[0], 'print', 'coeiroink')
-    end
-    exit
   end
 
   # VOICEVOX ENGINEのバージョンからSpeakerIDの最大値を求める
@@ -1067,9 +1245,41 @@ else
   debug_print("RANDAM_SPEAKERからVOICEVOXの声種を削除しました (RANDOM_SPEAKER=#{random_speaker_id})")
 end
 
+# 設定ファイルで指定された中で使用可能なVOICEVOX NEMO ENGINEがあれば、指定可能なSpeakerID一覧を求める
+if (not @voicevox_nemo_engines.nil?) and @voicevox_nemo_engines.length > 0 then
+  @voicevox_nemo_available_speakers = get_available_speakerid(@voicevox_nemo_engines[0], mode="get", type="voicevox_nemo")
+  debug_print("@voicevox_nemo_available_speakers=#{@voicevox_nemo_available_speakers}")
+  if @voicevox_nemo_available_speakers.nil? then
+    STDERR.print "VOICEVOX NEMOサーバから、指定可能なSpeakerID一覧が取得できません\n"
+    exit 1
+  end
+  # random_speaker_idから、VOICEVOX NEMOサーバで指定できない値を削除
+  temp_array = Array.new
+  random_speaker_id.each{|value|
+    if value =~ /^n([0-9]+)$/ then
+      if not @voicevox_nemo_available_speakers.include?($1.to_i) then
+        debug_print("VOICEVOX NEMOサーバで SpeakerID \"#{$1}\" は指定できないためRANDOM_SPEAKERから削除します")
+        temp_array << value
+      end
+    end
+  }
+  random_speaker_id = random_speaker_id - temp_array
+# 使用可能なVOICEVOX NEMO ENGINEがなければ、ランダム選択の声種からVOICEVOX NEMOのものを取り除く
+else
+  temp_array = Array.new
+  random_speaker_id.each{|value|
+    if value =~ /^n[0-9]+$/ then
+      temp_array << value
+    end
+  }
+  random_speaker_id = random_speaker_id - temp_array
+  debug_print("RANDAM_SPEAKERからVOICEVOX NEMOの声種を削除しました (RANDOM_SPEAKER=#{random_speaker_id})")
+end
+
 # 設定ファイルで指定された中で使用可能なCOEIROINK ENGINEがあれば、指定可能なSpeakerID一覧を求める
 if (not @coeiroink_engines.nil?) and @coeiroink_engines.length > 0 then
-  @coeiroink_available_speakers = get_available_speakerid(@coeiroink_engines[0])
+  @coeiroink_available_speakers = get_available_speakerid(@coeiroink_engines[0], mode="get", type="coeiroink")
+  debug_print("@coeiroink_available_speakers=#{@coeiroink_available_speakers}")
   if @coeiroink_available_speakers.nil? then
     STDERR.print "COEIROINKサーバから、指定可能なSpeakerID一覧が取得できません\n"
     exit 1
@@ -1114,6 +1324,20 @@ if speaker =~ /^([0-9]+)/ then
     STDERR.print "VOICEVOX の -s (--speaker)\" の値は、0～#{@max_speaker_id} のいずれかの整数を指定してください\n"
     exit 1
   end
+# VOICEVOX NEMOのSpeakerIDが指定された場合
+elsif speaker =~ /^n([0-9]+)/ then
+  server_type = "voicevox_nemo"
+  speaker = $1.to_i
+  # VOICEVOX NEMO ENGINEが指定されていなかったら
+  if @voicevox_nemo_engines == [] then
+    STDERR.print "VOICEVOX NEMO ENGINEが設定されていないため、SpeakerID \"n#{speaker}\" は指定できません\n"
+    exit 1
+  end
+  # VOICEVOX NEMOサーバで使用できないSpeakerIDの場合
+  if not @voicevox_nemo_available_speakers.include?(speaker) then
+    STDERR.print "-s (--speaker)\" の値は、VOICEVOX NEMOサーバで使用できません\n"
+    exit 1
+  end
 # COEIROINKのSpeakerIDが指定された場合
 elsif speaker =~ /^c([0-9]+)/ then
   server_type = "coeiroink"
@@ -1142,6 +1366,13 @@ elsif speaker =~ /^[Rr]$/ then
         server_type = "voicevox"
         break
       end
+    # VOICEVOX NEMOのSpeakerIDが指定された場合
+    elsif speaker =~ /^n([0-9]+)$/ then
+      speaker = $1.to_i
+      if @voicevox_nemo_available_speakers.include?($1.to_i) then
+        server_type = "voicevox_nemo"
+        break
+      end
     # COEIROINKのSpeakerIDが指定された場合
     elsif speaker =~ /^c([0-9]+)$/ then
       speaker = $1.to_i
@@ -1157,15 +1388,18 @@ elsif speaker =~ /^[Rr]$/ then
     counter+=1
   end
 else
-  STDERR.print "\"-s (--speaker)\" の値は、\"整数\" \"c整数\" または \"r\" を指定してください\n"
+  STDERR.print "\"-s (--speaker)\" の値は、\"整数\" \"n整数\" \"c整数\" または \"r\" を指定してください\n"
   exit 1
 end
 
 # query_speaker の値チェック
 if query_speaker != "" then
   debug_print("query_speaker=#{query_speaker}")
+  # もし、query_speakerが「n<数字>」形式だったら「n」を削除する
+  if query_speaker =~ /^n([0-9]+)$/ then
+    query_speaker = $1
   # もし、query_speakerが「c<数字>」形式だったら「c」を削除する
-  if query_speaker =~ /^c([0-9]+)$/ then
+  elsif query_speaker =~ /^c([0-9]+)$/ then
     query_speaker = $1
   end
   if query_speaker !~ /^[0-9]+$/ then
@@ -1177,9 +1411,14 @@ if query_speaker != "" then
       STDERR.print "\"--query\" の値は、VOICEVOX ENGINEで使用できないSpeakerIDです。0～#{@max_speaker_id} のいずれかを整数で指定してください\n"
       exit 1
     end
+  elsif server_type == "voicevox_nemo" then
+    if not @voicevox_nemo_available_speakers.include?(query_speaker.to_i) then
+      STDERR.print "\"--query\" の値 \"#{query_speaker}\" は、VOICEVOX NEMO ENGINEで使用できないSpeakerIDです\n"
+      exit 1
+    end
   elsif server_type == "coeiroink" then
     if not @coeiroink_available_speakers.include?(query_speaker.to_i) then
-      STDERR.print "\"--query\" の値　\"#{query_speaker}\" は、COEIROINK ENGINEで使用できないSpeakerIDです\n"
+      STDERR.print "\"--query\" の値 \"#{query_speaker}\" は、COEIROINK ENGINEで使用できないSpeakerIDです\n"
       exit 1
     end
   end
@@ -1187,8 +1426,11 @@ end
 
 # morph_speaker の値チェック
 debug_print("morph_speaker=#{morph_speaker}, morph_rate=#{morph_rate}")
+# もし、morph_speakerが「n<数字>」形式だったら「n」を削除する
+if morph_speaker =~ /^n([0-9]+)$/ then
+  morph_speaker = $1
 # もし、morph_speakerが「c<数字>」形式だったら「c」を削除する
-if morph_speaker =~ /^c([0-9]+)$/ then
+elsif morph_speaker =~ /^c([0-9]+)$/ then
   morph_speaker = $1
 end
 if morph_speaker != "" or morph_rate != "" then
@@ -1199,6 +1441,11 @@ if morph_speaker != "" or morph_rate != "" then
   if server_type == "voicevox" then
     if morph_rate.to_f < 0.0 or 1.0 < morph_rate.to_f or morph_speaker.to_i < 0 or @max_speaker_id < morph_speaker.to_i then
       STDERR.print "\"-m (--morph_speaker)\" の値は、VOICEVOX ENGINEで使用可能な 0～#{@max_speaker_id} のいずれかのSpeakerIDと、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
+      exit 1
+    end
+  elsif server_type == "voicevox_nemo" then
+    if morph_rate.to_f < 0.0 or 1.0 < morph_rate.to_f or (not @voicevox_nemo_available_speakers.include?(query_speaker.to_i)) then
+      STDERR.print "\"-m (--morph_speaker)\" の値は、VOICEVOX NEMO ENGINEで使用可能なSpeakerIDと、0.0～1.0 の小数を「,(カンマ)」でつないだ値にしてください\n"
       exit 1
     end
   elsif server_type == "coeiroink" then
@@ -1528,9 +1775,17 @@ conv_text.each{|text|
       speaker_element.each {|temp|
 
         # もし、「s<数字>」だったら声の種類を変更
-        if temp =~ /^ *sc?[0-9]+ *$/ then
+        if temp =~ /^ *s[nc]?[0-9]+ *$/ then
+          # 「sn<数字>」だったらVOICEVOX NEMOをセット
+          if temp =~ /^ *sn([0-9]+) *$/ then
+            speaker = $1
+            server_type = "voicevox_nemo"
+            if not @voicevox_nemo_available_speakers.include?(speaker.to_i) then
+              STDERR.print "指定のspeakerID \"#{speaker}\" は、利用のVOICEVOX NEMO ENGINEで使用できません\n"
+              exit 1
+            end
           # 「sc<数字>」だったらCOEIROINKをセット
-          if temp =~ /^ *sc([0-9]+) *$/ then
+          elsif temp =~ /^ *sc([0-9]+) *$/ then
             speaker = $1
             server_type = "coeiroink"
             if not @coeiroink_available_speakers.include?(speaker.to_i) then
@@ -1552,8 +1807,15 @@ conv_text.each{|text|
           counter=0
           while true do
             speaker = random_speaker_id.sample
+            # VOICEVOX NEMOのSpeakerIDが指定された場合
+            if speaker[0] == "n" and speaker =~ /^n([0-9]+)$/ then
+              speaker = $1
+              if @voicevox_nemo_available_speakers.include?($1.to_i) then
+                server_type = "voicevox_nemo"
+                break
+              end
             # COEIROINKのSpeakerIDが指定された場合
-            if speaker[0] == "c" and speaker =~ /^c([0-9]+)$/ then
+            elsif speaker[0] == "c" and speaker =~ /^c([0-9]+)$/ then
               speaker = $1
               if @coeiroink_available_speakers.include?($1.to_i) then
                 server_type = "coeiroink"
@@ -1628,6 +1890,8 @@ conv_text.each{|text|
       # 文頭に埋め込む文字列を作成
       if server_type == "voicevox" then
         head_str = "tV,s#{speaker.to_s}"
+      elsif server_type == "voicevox_nemo" then
+        head_str = "tN,s#{speaker.to_s}"
       elsif server_type == "coeiroink" then
         head_str = "tC,s#{speaker.to_s}"
       end
@@ -1774,15 +2038,19 @@ conv_text.each{|text|
 
 # VOICEVOXとCOEIROINKで変換する文字列を分ける
 voicevox_input_text = Hash.new
+voicevox_nemo_input_text = Hash.new
 coeiroink_input_text = Hash.new
 input_text.each{|key,value|
   if value =~ /^#\{tV,/ then
     voicevox_input_text[key] = value
+  elsif value =~ /^#\{tN,/ then
+    voicevox_nemo_input_text[key] = value
   elsif value =~ /^#\{tC,/ then
     coeiroink_input_text[key] = value
   end
 }
 debug_print("voicevox_input_text=#{voicevox_input_text}")
+debug_print("voicevox_nemo_input_text=#{voicevox_nemo_input_text}")
 debug_print("coeiroink_input_text=#{coeiroink_input_text}")
 
 # 各サーバでの処理が完了したら1になるフラグ
@@ -1791,6 +2059,11 @@ if voicevox_input_text.length > 0 then
 else
   vv_complete_flag = 1
 end
+if voicevox_nemo_input_text.length > 0 then
+  vn_complete_flag = 0
+else
+  vn_complete_flag = 1
+end
 if coeiroink_input_text.length > 0 then
   ci_complete_flag = 0
 else
@@ -1798,11 +2071,12 @@ else
 end
 
 # VOICEVOXとCOEIROINK両方を混ぜて音声変換する場合に、サンプリングレートを44100に統一する
-if voicevox_input_text.length > 0 and coeiroink_input_text.length > 0 then
+if (voicevox_input_text.length > 0 or voicevox_nemo_input_text.length > 0 ) and coeiroink_input_text.length > 0 then
   voicevox_sample_rate = 44100
+  voicevox_nemo_sample_rate = 44100
   unite_sample_rate = 44100
 # VOICEVOXのみで音声変換する場合は、サンプリングレートは24000
-elsif voicevox_input_text.length > 0 and coeiroink_input_text.length == 0 then
+elsif (voicevox_input_text.length > 0 or voicevox_nemo_input_text.length > 0 ) and coeiroink_input_text.length == 0 then
   unite_sample_rate = 24000
 # COEIROINKのみで音声変換する場合は、サンプリングレートは44100
 else
@@ -1871,6 +2145,70 @@ voicevox_input_text.each{|key,value|
     # スレッドを作成して音声変換を実行させる
     debug_print("create voicevox thread #{i}")
     vv_threads[i] = Thread.new { thread_proc( "voicevox", server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, voicevox_sample_rate ) }
+
+  # 変換すべき文字列と割り当てるサーバのどちらかがなければ最初のスレッド実行は終了
+  else
+    break
+  end
+
+  # スレッド番号を増やす
+  i = i + 1
+}
+
+
+## VOICEVOX NEMOを使用して変換するスレッドを実行する
+
+# VOICEVOX NEMOスレッドを格納するハッシュを初期化
+vn_threads = Array.new
+# VOICEVOX NEMOスレッドが処理中の input_text のキーと文字列を格納する配列
+vn_thread_key = Array.new
+vn_thread_text = Array.new
+# VOICEVOX NEMOスレッドが使用中のサーバ(エンジン)のインデックスを格納する配列
+vn_thread_server = Array.new
+# VOICEVOX NEMOの使用されていないサーバ(エンジン)を格納する配列
+vn_unuse_server = @voicevox_nemo_engines.dup
+
+# どのスレッドに割り当てるかを決める変数
+i = 0
+
+# 最初のVOICEVOX NEMOスレッド実行
+voicevox_nemo_input_text.each{|key,value|
+
+  # まだ変換すべき文字列と割り当てるサーバ(エンジン)が残っていれば
+  if 0 < voicevox_nemo_input_text.length and i < @voicevox_nemo_engines.length then
+
+    # スレッドが処理中のキー、テキストにセット
+    vn_thread_key[i] = key
+    vn_thread_text[i] = value
+
+    # 未使用サーバから割り当てるサーバ(エンジン)を削除
+    vn_unuse_server.delete(@voicevox_nemo_engines[i])
+
+    # スレッドが使用中のサーバ(エンジン)をセット
+    vn_thread_server[i] = @voicevox_nemo_engines[i]
+
+    # スレッドに渡す用の一時的変数
+    server_temp = @voicevox_nemo_engines[i]
+
+    # voicevox_nemo_input_textから取り除く
+    voicevox_nemo_input_text.delete(key)
+
+    # 変換した文の数をカウントする変数を増やす
+    conv_count = conv_count + 1
+
+    # 進捗表示
+    if quiet_flag == 0 then
+      STDERR.print "#{conv_count}/#{total_count} [#{key}] \"#{orig_text[key].chomp}\"\n"
+    end
+
+    # 詳細メッセージ
+    if verbous_flag == 1 then
+      STDERR.print "    => \"#{value.chomp}\"\n"
+    end
+
+    # スレッドを作成して音声変換を実行させる
+    debug_print("create voicevox nemo thread #{i}")
+    vn_threads[i] = Thread.new { thread_proc( "voicevox_nemo", server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, voicevox_nemo_sample_rate ) }
 
   # 変換すべき文字列と割り当てるサーバのどちらかがなければ最初のスレッド実行は終了
   else
@@ -2115,6 +2453,168 @@ catch :loop do
       }
     end
 
+    # VOICEVOX NEMOの処理が完了していなかったら
+    if vn_complete_flag == 0 then
+      # VOICEVOX NEMOスレッド状態をチェック
+      vn_threads.each_with_index{|thr,index|
+  
+        # VOICEVOX NEMOスレッドが異常終了している場合
+        if vn_threads[index].status.nil? then
+  
+          # エラー表示して終了
+          debug_print("voicevox nemo thread #{index} が異常終了しました")
+          STDERR.print "スレッドが異常終了したため終了します\n"
+          exit 1
+  
+        # VOICEVOX NEMOスレッドが正常終了している場合
+        elsif vn_threads[index].status == false and vn_thread_key[index] != "" then
+  
+          # 音声データが返ってきたら
+          if not vn_threads[index].value.nil? then
+            debug_print("voicevox nemo thread #{index} が正常終了しました")
+  
+            # どのインデックスの音声データか調べる
+            vn_thread_key[index] =~ /^([0-9]+)\-([0-9]+)$/
+            p_num = $1.to_i
+            s_num = $2.to_i
+  
+            # もし output_wavdata[文節番号] が nil であれば空の配列で初期化
+            if output_wavdata[p_num].nil? then
+              output_wavdata[p_num] = Array.new
+            end
+  
+            # output_wavdata[文節番号][文章番号] に音声データを格納
+            output_wavdata[p_num][s_num] = vn_threads[index].value
+  
+            # まだ voicevox_nemo_input_text に残っていたら新しいスレッドを実行する
+            if voicevox_nemo_input_text.length > 0 then
+  
+              # voicevox_nemo_input_text に残っているデータで新しいスレッドを実行する
+              voicevox_nemo_input_text.each{|key,value|
+  
+                # スレッドが処理中のキー、テキストにセット
+                vn_thread_key[index] = key
+                vn_thread_text[index] = value
+  
+                # スレッドが使用中のサーバをセット
+                server_temp = vn_thread_server[index]
+  
+                # voicevox_nemo_input_textから取り除く
+                voicevox_nemo_input_text.delete(key)
+  
+                # 変換した文の数のカウントを増やす
+                conv_count = conv_count + 1
+  
+                # 進捗表示
+                if quiet_flag == 0 then
+                  STDERR.print "#{conv_count}/#{total_count} [#{key}] \"#{orig_text[key].chomp}\"\n"
+                end
+  
+                # 詳細メッセージ
+                if verbous_flag == 1 then
+                  STDERR.print "    => \"#{value.chomp}\"\n"
+                end
+  
+                # スレッドを作成して音声変換を実行させる
+                debug_print("create voicevox nemo thread #{index}")
+                vn_threads[index] = Thread.new { thread_proc( "voicevox_nemo", server_temp, value, speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, voicevox_nemo_sample_rate ) }
+  
+                # each文を抜ける
+                break
+              }
+  
+            # voicevox_nemo_input_text が空になった場合は新しいスレッドは実行せず、実行中のスレッドの状態をチェック
+            else
+  
+              # VOICEVOX NEMOスレッドが使用中のキー、テキスト、サーバをクリア
+              vn_thread_key[index] = ""
+              vn_thread_text[index] = ""
+              vn_thread_server[index] = ""
+              break_flag = 1
+  
+              # 未使用のVOICEVOX NEMOサーバに戻す
+              vn_unuse_server << vn_thread_server[index]
+  
+              # 実行中のスレッドがあるかチェック
+              vn_thread_key.each_with_index{|tkey|
+                # 実行中スレッドがあれば
+                if tkey != "" then
+                  break_flag = 0
+                end
+              }
+  
+              # 実行中のスレッドがなければci_complete_flagを1にする
+              if break_flag == 1 then
+                vn_complete_flag = 1
+              end
+            end
+  
+          # 音声データ取得に失敗していたら、それ以降そのサーバは使用しない
+          else      
+  
+            STDERR.print "サーバ \"#{vn_thread_server[index]}\" は除外します\n"
+            debug_print("vn_unuse_server: #{vn_unuse_server}")
+  
+            # 未使用のVOICEVOX NEMOサーバがなければキー、テキストをvoicevox_nemo_input_textに戻す
+            if vn_unuse_server.length == 0 then
+  
+              # 変換した文の数のカウントを減らす
+              conv_count = conv_count - 1
+  
+              # スレッドが処理していたキー、テキストをvoicevox_nemo_input_textに戻す
+              voicevox_nemo_input_text[ vn_thread_key[index] ] = vn_thread_text[index]
+  
+              # スレッドが使用中のキー、テキスト、サーバをクリア
+              vn_thread_key[index] = ""
+              vn_thread_text[index] = ""
+              vn_thread_server[index] = ""
+  
+              # 使用可能なVOICEVOX NEMOサーバがあるかチェック
+              debug_print("voicevox nemo thread: #{vn_thread_server}")
+              available_server_flag = 0
+              vn_thread_server.each {|thvalue|
+                if thvalue != "" then
+                  available_server_flag = 1
+                end
+              }
+  
+              # 全ての使用可能なCOEIROINKサーバがなくなったらエラー終了
+              if available_server_flag == 0 then
+                STDERR.print "利用可能なVOICEVOX NEMOサーバがありません\n"
+                exit 1
+              end
+  
+            # 未使用のVOICEVOX NEMOサーバがあればそちらのサーバでスレッドを起動する
+            else
+  
+              # 未使用VOICEVOX NEMOサーバの最初のものを割り当て
+              vn_thread_server[index] = vn_unuse_server[0]
+              vn_unuse_server.delete(vn_thread_server[index])
+  
+              # VOICEVOX NEMOスレッドが使用中のサーバをセット
+              server_temp = vn_thread_server[index]
+  
+              # 進捗表示
+              if quiet_flag == 0 then
+                STDERR.print "#{conv_count}/#{total_count} [#{vn_thread_key[index]}] \"#{orig_text[vn_thread_key[index]].chomp}\"\n"
+              end
+  
+              # 詳細メッセージ
+              if verbous_flag == 1 then
+                STDERR.print "    => \"#{vn_thread_text[index].chomp}\"\n"
+              end
+  
+              # VOICEVOX NEMOスレッドを作成して音声変換を実行させる
+              debug_print("create voicevox nemo thread #{index}")
+              vn_threads[index] = Thread.new { thread_proc( "voicevox_nemo", server_temp, vn_thread_text[index], speaker, morph_speaker, morph_rate, query_speaker, param_speed, param_pitch, param_intonation, param_volume, verbous_flag, voicevox_nemo_sample_rate ) }
+  
+            end
+  
+          end
+        end
+      }
+    end
+
     # COEIROINKの処理が完了していなかったら
     if ci_complete_flag == 0 then
       # COEIROINKスレッド状態をチェック
@@ -2223,7 +2723,7 @@ catch :loop do
               # 変換した文の数のカウントを減らす
               conv_count = conv_count - 1
   
-              # スレッドが処理していたキー、テキストをvoicevox_input_textに戻す
+              # スレッドが処理していたキー、テキストをcoeiroink_input_textに戻す
               coeiroink_input_text[ ci_thread_key[index] ] = ci_thread_text[index]
   
               # スレッドが使用中のキー、テキスト、サーバをクリア
@@ -2277,8 +2777,8 @@ catch :loop do
       }
     end
 
-    # VOICEVOX、COEIROINK両方の処理が終わったらループを抜ける
-    if vv_complete_flag == 1 and ci_complete_flag == 1 then
+    # VOICEVOX、VOICEVOX NEMO、COEIROINKすべての処理が終わったらループを抜ける
+    if vv_complete_flag == 1 and vn_complete_flag == 1 and ci_complete_flag == 1 then
       throw :loop
     end
   

@@ -1,29 +1,35 @@
 # VOICEVOX CLI Client
 
-[VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine)、[COEIROINK](https://coeiroink.com/)用のコマンドラインツールです。
+[VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine)、[VOICEVOX NEMO ENGINE](https://github.com/VOICEVOX/voicevox_nemo_engine)、[COEIROINK](https://coeiroink.com/) (※COEIROINKv2には未対応です)用のコマンドラインツールです。
 
 # 機能
 
-VOICEVOX ENGINEまたは、COEIROINK ENGINEを利用して、テキストを音声ファイルにしたり再生することができます。
+VOICEVOX ENGINE、VOICEVOX NEMO ENGINEまたは、COEIROINK ENGINEを利用して、テキストを音声ファイルにしたり再生することができます。
 
 テキスト内にある空行を区切りとして、別々の音声ファイルに保存されます。一つの音声ファイルにまとめて出力することも可能です。
 
 また、テキスト内の文章の先頭に決まった書式で記述することで、その部分以降の読み上げパラメータ(音声種別や速度など)を変更することができます。
 
-複数のVOICEVOX ENGINE、COEIROINK ENGINEを設定することで、並列で音声変換が実行できます。(句点、改行、？ で文章を区切り、文章ごとに音声変換処理を実行します)
+複数のVOICEVOX ENGINE、VOICEVOX NEMO ENGINE、COEIROINK ENGINEを設定することで、並列で音声変換が実行できます。(句点、改行、？ で文章を区切り、文章ごとに音声変換処理を実行します)
 
-VOICEVOX ENGINE、COEIROINK ENGINEのユーザ辞書に対し、単語の追加、編集、削除、ファイルからの一括登録などができます。
+VOICEVOX ENGINE、VOICEVOX NEMO ENGINE、COEIROINK ENGINEのユーザ辞書に対し、単語の追加、編集、削除、ファイルからの一括登録などができます。
 
 # 動作要件
 
-Rocky Linux 8.6で、Ruby 2.5.9を使用して作成していますが、LinuxでRubyが実行できる環境であれば動くと思います。
+Rocky Linux 8.8で、Ruby 2.5.9を使用して作成していますが、LinuxでRubyが実行できる環境であれば動くと思います。
 
-VOICEVOX ENGINE、COEIROINK ENGINEは別途用意して起動してください。
+VOICEVOX ENGINE、VOICEVOX NEMO ENGINE、COEIROINK ENGINEは別途用意して起動してください。
 
 VOICEVOX ENGINEはDockerを使用して起動するのが簡単だと思います。以下のようなコマンドで起動するとネットワーク経由でVOICEVOX ENGINEにアクセスできるようになります。(意図しないクライアントから接続できないようにファイアウォールなどで制限を行うことをおすすめします)
 
 ```bash
-# docker run -d --restart=always --network=host --name=voicevox voicevox/voicevox_engine:cpu-ubuntu20.04-0.13.2
+# docker run -d --restart=always --network=host --name=voicevox voicevox/voicevox_engine:cpu-ubuntu20.04-0.14.6
+```
+
+VOICEVOX NEMO ENGINEは、同様に以下のように起動できます。VOICEVOX ENGINEとは異なるポート番号を使用するため、同時に起動することが可能です。
+
+```bash
+# docker run -d --restart=always --network=host --name=voicevox voicevox/voicevox_nemo_engine:cpu-ubuntu20.04-0.14.0
 ```
 
 COEIROINKはLinux版がありません。Windows版の場合、コマンドプロンプトで以下のように実行することで起動できます。IPアドレスは、Windowsマシンに割り当てたものを指定してください。wineを使用してLinux上でWindows版を起動することもできるようです。
@@ -54,6 +60,12 @@ VOICEVOX_ENGINE = [ "192.168.0.11:50021", "192.168.0.12:50021" ]
 
 VOICEVOX ENGINEを使用しない場合は `VOICEVOX_ENGINE = [ ]` と、値を空にしてください。
 
+VOICEVOX NEMO ENGINEを使用する場合は同様に、
+
+```
+VOICEVOX_NEMO_ENGINE = [ "192.168.0.21:50121" ]
+```
+
 COEIROINKを使用する場合は同様に、
 
 ```
@@ -62,7 +74,7 @@ COEIROINK_ENGINE = [ "192.168.0.21:50031" ]
 
 のように設定してください。VOICEVOX ENGINEと同様にカンマ区切りで複数指定も可能です。COEIROINK を使用しない場合は `COEIROINK_ENGINE = [ ]` と、値を空にしてください。
 
-VOICEVOX、COEIROINK両方のエンジンを指定することも可能です。VOICEVOXの音声のみで作成したWAVファイルはサンプリングレートが24kHzとなりますが、COEIROINKの音声のみ、またはVOICEVOXとCOEIROINKの音声を混在させて作成したWAVファイルはサンプリングレートが44.1kHzとなります。
+VOICEVOX、COEIROINK両方の音声を混在させたWAVファイルを出力可能です。VOICEVOXの音声のみで作成したWAVファイルはサンプリングレートが24kHzとなりますが、COEIROINKの音声のみ、またはVOICEVOXとCOEIROINKの音声を混在させて作成したWAVファイルはサンプリングレートが44.1kHzとなります。
 
 設定後に、
 
@@ -78,7 +90,7 @@ $ vvtts --check
 $ vvtts --list
 ```
 
-と実行することで、VOICEVOX ENGINE、COEIROINK ENGINEから情報を取得して表示されます。
+と実行することで、VOICEVOX ENGINE、VOICEVOX NEMO ENGINE、COEIROINK ENGINEから情報を取得して表示されます。
 
 アンインストールする場合は、設置したファイルを全て削除してください。
 
@@ -92,6 +104,7 @@ $ vvtts --list
 $ vvtts -s 2 "音声ファイルに変換したいテキストをここに入力してください"
 ```
 
+VOICEVOX NEMO の音声を指定する場合は、Speaker IDの前に `n` を付けて、`-s n0` のように指定してください。
 COEIROINK の音声を指定する場合は、Speaker IDの前に `c` を付けて、`-s c1` のように指定してください。
 
 テキストが記述されたファイルを指定し、音声ファイルに変換する
@@ -169,7 +182,7 @@ $ vvtts -f text.txt
 
 | テキストに記述する文字 | 効果                                                                |
 | ---------------------- | ------------------------------------------------------------------- |
-| #{s12}                 | 音声種別変更。数字の代わりに「R」を記述するとランダムで選択されます。COEIROINKの音声を指定する場合は `#{sc1}` のように c を付けて指定してください |
+| #{s12}                 | 音声種別変更。数字の代わりに「R」を記述するとランダムで選択されます。VOICEVOX NEMOの音声を指定する場合は `#{sn0}` のように n を、COEIROINKの音声を指定する場合は `#{sc1}` のように c を付けて指定してください |
 | #{q5}                  | クエリ時の声の種別を変更                                            |
 | #{m3,r0.5}             | モーフィング先の声の種別と、モーフィングレートを変更                |
 | #{S0.8}                | スピードスケールを変更                                              |
@@ -197,7 +210,7 @@ $ vvtts -f text.txt
 
 ## 読み方&アクセント辞書
 
-`vvdict` コマンドで、VOICEVOX ENGINE、COEIROINK ENGINEに読み方&アクセント辞書を登録できます。複数台のエンジンを設定している場合は、全てのエンジンに対して操作を行います。
+`vvdict` コマンドで、VOICEVOX ENGINE、VOICEVOX NEMO ENGINE、COEIROINK ENGINEに読み方&アクセント辞書を登録できます。複数台のエンジンを設定している場合は、全てのエンジンに対して操作を行います。
 
 単語追加 - `単語` `読み方(カタカナ)` `アクセント核位置` `優先度` を順に指定してください。優先度(1~9 大きいほど優先度高)は省略可で省略すると `5` に設定されます
 

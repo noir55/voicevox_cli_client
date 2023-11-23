@@ -261,8 +261,8 @@ end
 # デバッグモードを使用するかどうかを格納する変数
 @debug_flag = 0
 
-# VOICEVOX ENGINE、COEIROINK ENGINEの重複を取り除く
-@engines = VOICEVOX_ENGINE.uniq + COEIROINK_ENGINE.uniq
+# VOICEVOX ENGINE、VOICEVOX NEMO ENGINE、COEIROINK ENGINEの重複を取り除く
+@engines = VOICEVOX_ENGINE.uniq + VOICEVOX_NEMO_ENGINE.uniq + COEIROINK_ENGINE.uniq
 
 # 動作モードを格納する変数
 mode = ""

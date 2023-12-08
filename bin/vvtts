@@ -1458,7 +1458,7 @@ end
 
 # first_silent_time の値チェック
 debug_print("first_silent_time=#{first_silent_time}")
-if first_silent_time =~ /^[0-9\.]$/ then
+if #{first_silent_time} =~ /^[0-9\.]$/ then
   STDERR.print "\"-i (--first)\" の値は、数値(小数点可)を指定してください\n"
   exit 1
 elsif first_silent_time.to_f < 0 then
@@ -1468,7 +1468,7 @@ end
 
 # last_silent_time の値チェック
 debug_print("last_silent_time=#{last_silent_time}")
-if last_silent_time =~ /^[0-9\.]$/ then
+if #{last_silent_time} =~ /^[0-9\.]$/ then
   STDERR.print "\"-i (--last)\" の値は、数値(小数点可)を指定してください\n"
   exit 1
 elsif last_silent_time.to_f < 0 then
@@ -1478,7 +1478,7 @@ end
 
 # interval の値チェック
 debug_print("interval_time=#{interval_time}")
-if interval_time =~ /^[0-9\.]$/ then
+if #{interval_time} =~ /^[0-9\.]$/ then
   STDERR.print "\"-i (--interval)\" の値は、数値(小数点可)を指定してください\n"
   exit 1
 elsif interval_time.to_f < 0 then
@@ -1488,7 +1488,7 @@ end
 
 # paragraph_interval_time の値チェック
 debug_print("paragraph_interval_time=#{paragraph_interval_time}")
-if paragraph_interval_time =~ /^[0-9\.]$/ then
+if #{paragraph_interval_time} =~ /^[0-9\.]$/ then
   STDERR.print "\"-i (--paragraph-interval)\" の値は、数値(小数点可)を指定してください\n"
   exit 1
 elsif paragraph_interval_time.to_f < 0 then

@@ -19,7 +19,7 @@ require 'json'
 require "open3"
 
 # バージョン
-VERSION="1.4.0"
+VERSION="1.4.1"
 
 
 #------
@@ -43,6 +43,7 @@ VERSION_TO_MAX_SPEAKER_ID = {
   "0.14.4" => 60,
   "0.14.5" => 65,
   "0.14.6" => 74,
+  "0.14.7" => 86,
 }
 
 # デフォルトの設定ファイル
@@ -1212,7 +1213,11 @@ if (not @voicevox_engines.nil?) and @voicevox_engines.length > 0 then
       maj = $1.to_i
       min = $2.to_i
       rev = $3.to_i
-      if maj_version >= maj and min_version >= min and revision >= rev then
+      if maj_version > maj then
+        @max_speaker_id = VERSION_TO_MAX_SPEAKER_ID[version]
+      elsif maj_version >= maj and min_version > min then
+        @max_speaker_id = VERSION_TO_MAX_SPEAKER_ID[version]
+      elsif maj_version >= maj and min_version >= min and revision >= rev then
         @max_speaker_id = VERSION_TO_MAX_SPEAKER_ID[version]
       end
     else
@@ -1224,6 +1229,7 @@ if (not @voicevox_engines.nil?) and @voicevox_engines.length > 0 then
     STDERR.print "指定可能なSperkerIDの最大値が不明です\n"
     exit 1
   end
+  debug_print("max_speaker_id=#{@max_speaker_id}")
   # random_speaker_idから、SpeakerIDの最大値より大きな値を削除
   temp_array = Array.new
   random_speaker_id.each{|value|

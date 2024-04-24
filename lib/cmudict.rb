@@ -1,4 +1,4 @@
-#!/bin/env ruby
+#!/usr/bin/env ruby
 
 class CMUDICT
 
@@ -78,7 +78,7 @@ class CMUDICT
     @eng_kana_dic = Hash.new
 
     # キャッシュファイルがあり、キャッシュファイルのほうが新しい場合キャッシュファイルから読み込む
-    if File.exist?("#{__dir__}/cmudict.cache") and 
+    if File.exist?("#{__dir__}/cmudict.cache") and
        File.mtime("#{__dir__}/cmudict.cache") > File.mtime("#{__dir__}/cmudict.dict") then
 
       open("#{__dir__}/cmudict.cache"){|f|
@@ -252,7 +252,7 @@ class CMUDICT
               end
             }
 	    #print "#{word}\t#{yomi}\n"
-            @eng_kana_dic[word] = yomi      
+            @eng_kana_dic[word] = yomi
           end
         } #each_line
       } #open

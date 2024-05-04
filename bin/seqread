@@ -1,4 +1,4 @@
-#!/bin/env ruby
+#!/usr/bin/env ruby
 
 require 'socket'
 require 'json'
@@ -74,4 +74,3 @@ rescue => e
 end
 
 exit
-

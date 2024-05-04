@@ -1,4 +1,4 @@
-#!/bin/env ruby
+#!/usr/bin/env ruby
 
 require 'socket'
 require 'open3'
@@ -58,7 +58,7 @@ def make_wavdata(jsondata)
   rescue => e
     # エラーが発生したら nil を返す
     STDERR.print "テキスト音声変換スレッドでエラーが発生しました (e=\"#{e.message}\")\n"
-    STDERR.print "VVTTSCMD=#{VVTTSCMD}\n" 
+    STDERR.print "VVTTSCMD=#{VVTTSCMD}\n"
     return nil
   end
 end
@@ -229,4 +229,3 @@ catch :loop do
 
   end
 end
-
